@@ -15,7 +15,7 @@
     "node": ">=24"
   },
   "bin": {
-    "yap-bot": "./bin/yap-bot.js"
+    "yap-bot": "bin/yap-bot.js"
   },
   "exports": {
     ".": {
