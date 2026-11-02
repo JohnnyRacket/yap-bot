@@ -12,7 +12,9 @@ Node 24. Your agent's files run as they are, with no build step.
                            timers · schedules · triggers · announcements · per-device history
 ```
 
-Every speech part is a swappable engine. The defaults all run in process on a CPU:
+Every speech part is a swappable engine, and speech in and out can come from services on other
+machines (Wyoming / Home Assistant, OpenAI-compatible, sherpa-onnx servers). The defaults all run in
+process on a CPU:
 **Nemotron Speech Streaming** (speech to text, 160 ms chunks), **Silero** (voice activity),
 **Smart Turn v3** (end of turn), a **sherpa-onnx zipformer** keyword spotter (wake word, also run on
 the device in WebAssembly) and **Kokoro 82M** (speech).
@@ -107,7 +109,7 @@ history, then the per-turn context line and words) so llama.cpp reuses its cache
 
 ```ts
 import { defineVoice } from "yap-bot";
-import { nemotron, sherpaStt, silero, smartTurn, sherpaKws, kokoro, openaiSpeech } from "yap-bot/engines";
+import { nemotron, sherpaStt, silero, smartTurn, sherpaKws, kokoro, openaiSpeech, wyomingStt } from "yap-bot/engines";
 
 export default defineVoice({
   stt: nemotron({ threads: 2 }),        // or sherpaStt({ model: "<sherpa-onnx streaming transducer>" })
@@ -116,11 +118,35 @@ export default defineVoice({
   wake: { spotter: sherpaKws() },       // false → only the transcript wakes it
   tts: { engine: kokoro({ threads: 4 }), voice: "af_heart", speed: 1.3, ackSpeed: 1.1 },
   // tts: { engine: openaiSpeech({ baseUrl: "http://kokoro:8880/v1" }), voice: "af_heart", speed: 1.2 },
+  // stt: wyomingStt({ uri: "tcp://whisper.lan:10300" }),   speech services elsewhere: see below
   interruptions: { minWords: 2, pauseOnSpeech: true },
   acks: { tool: ["Okay.", "Sure."] },
   phrases: { error: "Sorry, something went wrong.", noAnswer: "…", timerDone: (t) => "…" },
 });
 ```
+
+### Speech services elsewhere
+
+Speech to text and speech can each come from a service on another machine instead: a GPU box,
+a Home Assistant setup, a cloud API. Voice activity, turn detection and the wake word stay local:
+they're small, and they need every 32 ms of audio without a network hop.
+
+| Engine | Talks to | Live words while you talk |
+|---|---|---|
+| `wyomingStt({ uri: "tcp://host:10300" })` | Wyoming speech to text: wyoming-faster-whisper and the others Home Assistant uses | if the server streams them |
+| `openaiTranscription({ baseUrl, model, apiKey?, partialEveryMs? })` | `POST /audio/transcriptions`: OpenAI, Groq, faster-whisper-server / speaches, LocalAI | with `partialEveryMs` (re-sends the audio so far) |
+| `sherpaWebsocket({ url: "ws://host:6006" })` | a sherpa-onnx streaming WebSocket server (e.g. Nemotron on a bigger machine) | yes |
+| `wyomingTts({ uri: "tcp://host:10200" })` | Wyoming speech: wyoming-piper and others. `tts.voice` is the server's voice name; speed is set on the server | |
+| `openaiSpeech({ baseUrl, model?, apiKey? })` | `POST /audio/speech` streaming PCM: Kokoro-FastAPI, OpenAI | |
+
+Audio streams to Wyoming and sherpa servers while you talk, over a connection per utterance, so
+only the last bit is left to decode when you stop. A batch service (`openaiTranscription`)
+transcribes the whole utterance when you stop. On a CPU-only box that took 0.75–1.4 s with
+Whisper base, against an instant final with a streaming engine. Without live words, talking over
+a reply interrupts it once your words are transcribed rather than as you say them. Live words
+from `partialEveryMs` cost the service a request each time and can delay the final text a little.
+If a service fails, the turn goes on with the live words heard so far, and the error is logged.
+`examples/remote-speech` picks each service from an environment variable.
 
 **Your own engine.** Hearing runs in worker threads, so a hearing engine is named by a module
 whose default export creates it (interfaces in `yap-bot/engines`: `SttEngine`, `VadEngine`,

@@ -173,19 +173,39 @@ function finalize(s: Session, reason: TurnReason) {
   if (!u) return;
   s.utt = null;
   const turnEndAt = now();
-  const text = u.stream.finish(u.silence ?? 0);
-  send({
-    type: "turn",
-    sid: s.sid,
-    text,
-    reason,
-    probability: u.probability,
-    audioMs: Math.round((u.samples / SR) * 1000),
-    lagMs: Math.round(u.maxLag),
-    speechEndAt: u.speechEndAt || turnEndAt,
-    turnEndAt,
-    finalAt: now(),
-  });
+  const done = (text: string) =>
+    send({
+      type: "turn",
+      sid: s.sid,
+      text: text.trim(),
+      reason,
+      probability: u.probability,
+      audioMs: Math.round((u.samples / SR) * 1000),
+      lagMs: Math.round(u.maxLag),
+      speechEndAt: u.speechEndAt || turnEndAt,
+      turnEndAt,
+      finalAt: now(),
+    });
+  // what was heard so far stands in when the final text can't be had
+  const failed = (e: unknown) => {
+    send({ type: "error", message: `speech to text: ${(e as Error).message ?? e}` });
+    done(u.lastText);
+  };
+  let text: string | Promise<string>;
+  try {
+    text = u.stream.finish(u.silence ?? 0);
+  } catch (e) {
+    return failed(e);
+  }
+  // a remote service answers later; the next utterance carries on meanwhile
+  if (typeof text === "string") done(text);
+  else text.then(done, failed);
+}
+
+/** Drops an utterance without finishing it. */
+function drop(s: Session) {
+  s.utt?.stream.close?.();
+  s.utt = null;
 }
 
 function askTurnDetector(audio: Float32Array): Promise<{ probability?: number; error?: string; ms: number }> {
@@ -321,7 +341,7 @@ function handle(msg: ToHearing) {
         // the device spots the wake word itself and stops sending audio when asleep: what was left
         // of an utterance won't be finished, and what came before the wake is from another time
         if (s.gate && !s.kws && (msg.listen || !msg.awake)) {
-          s.utt = null;
+          drop(s);
           s.pending = new Float32Array(0);
           s.prerollPos = 0;
           s.prerollFull = false;
@@ -332,7 +352,7 @@ function handle(msg: ToHearing) {
         if (msg.listen && msg.awake && s.mode !== "push") startUtterance(s, 0);
         break;
       case "mode":
-        if (s.utt && msg.mode !== s.mode) s.utt = null;
+        if (s.utt && msg.mode !== s.mode) drop(s);
         s.mode = msg.mode;
         if (msg.kws && spotter && !s.kws) s.kws = spotter.createStream();
         if (!msg.kws) s.kws = null;
@@ -348,6 +368,7 @@ function handle(msg: ToHearing) {
         s.pushDown = msg.down;
         break;
       case "close":
+        drop(s);
         sessions.delete(msg.sid);
         break;
     }

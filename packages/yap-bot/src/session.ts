@@ -285,6 +285,11 @@ export class Session {
         break;
       case "turn": {
         let text = ev.text;
+        // an engine without live words (a batch service) only now says what was said over the reply
+        if (this.turn && text && this.interruptions && this.accepting(text) && wordCount(text) >= this.hub.reg.voice.interruptions.minWords) {
+          log.info(`[${this.device.id}] interrupted by "${text}" (once it was transcribed)`);
+          this.interrupt();
+        }
         // still answering: talk over it that didn't interrupt (too short, or interruptions off) is dropped
         if (this.turn || !text) {
           if (this.turn) this.resume();

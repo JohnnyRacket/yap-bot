@@ -8,6 +8,9 @@
 //     wake: { spotter: sherpaKws() },
 //     tts: { engine: kokoro({ threads: 4 }), voice: "af_heart", speed: 1.2 },
 //   })
+//
+// Speech in and out can also come from services elsewhere: openaiTranscription(), wyomingStt() and
+// sherpaWebsocket() for speech to text, openaiSpeech() and wyomingTts() for speech.
 import type { EngineSpec, KwsSpec, ModelDownload, TtsSpec } from "./types.ts";
 import type { SherpaSttOptions } from "./sherpa-stt.ts";
 import type { SileroVadOptions } from "./silero-vad.ts";
@@ -15,9 +18,14 @@ import type { SmartTurnOptions } from "./smart-turn.ts";
 import type { SherpaKwsOptions } from "./sherpa-kws.ts";
 import { KokoroLocal } from "../speech/kokoro.ts";
 import { OpenAiSpeech, type OpenAiSpeechOptions } from "../speech/openai-speech.ts";
+import { WyomingSpeech, type WyomingSpeechOptions } from "../speech/wyoming-speech.ts";
+import type { OpenAiSttOptions } from "./openai-stt.ts";
+import type { WyomingSttOptions } from "./wyoming-stt.ts";
+import type { SherpaWsSttOptions } from "./sherpa-ws-stt.ts";
 
 export type * from "./types.ts";
-export type { SherpaSttOptions, SileroVadOptions, SmartTurnOptions, SherpaKwsOptions, OpenAiSpeechOptions };
+export type { SherpaSttOptions, SileroVadOptions, SmartTurnOptions, SherpaKwsOptions, OpenAiSpeechOptions, OpenAiSttOptions, WyomingSttOptions, SherpaWsSttOptions, WyomingSpeechOptions };
+export { WyomingClient, type WyomingEvent } from "./wyoming.ts";
 
 /** A module next to this one: .ts from source, .js once built. */
 const builtin = (name: string) => new URL(`./${name}${import.meta.url.endsWith(".ts") ? ".ts" : ".js"}`, import.meta.url).href;
@@ -51,6 +59,41 @@ export function sherpaStt(o: { model: string; featureDim?: number; threads?: num
     options: { model: o.model, featureDim: o.featureDim ?? 80, threads: o.threads ?? 2, padMs: o.padMs ?? 300 },
     downloads: download ? [download] : [],
   };
+}
+
+/** "tcp://host:10300" or "host:10300" → host and port. */
+function hostPort(uri: string): { host: string; port: number } {
+  const m = /^(?:tcp:\/\/)?\[?([^\]]+?)\]?:(\d+)\/?$/.exec(uri.trim());
+  if (!m) throw new Error(`expected host:port (or tcp://host:port), got "${uri}"`);
+  return { host: m[1], port: Number(m[2]) };
+}
+
+/**
+ * A service elsewhere with an OpenAI-compatible transcription endpoint: OpenAI, Groq,
+ * faster-whisper-server / speaches, LocalAI… The final text comes when the utterance ends, so
+ * talking over a reply interrupts it then, unless `partialEveryMs` also transcribes the audio so
+ * far that often for live words (more requests).
+ */
+export function openaiTranscription(o: Partial<OpenAiSttOptions> & Pick<OpenAiSttOptions, "baseUrl" | "model">): EngineSpec<OpenAiSttOptions> {
+  return {
+    name: `openai-transcription ${o.model} (${o.baseUrl})`,
+    module: builtin("openai-stt"),
+    options: { partialEveryMs: 0, timeoutMs: 15_000, ...o },
+  };
+}
+
+/**
+ * A Wyoming speech to text server (wyoming-faster-whisper and others Home Assistant uses):
+ * `wyomingStt({ uri: "tcp://whisper.lan:10300" })`. Audio streams as you talk; the text comes
+ * when the utterance ends (live words if the server streams them).
+ */
+export function wyomingStt(o: { uri: string; language?: string; timeoutMs?: number }): EngineSpec<WyomingSttOptions> {
+  return { name: `wyoming-stt ${o.uri}`, module: builtin("wyoming-stt"), options: { ...hostPort(o.uri), language: o.language, timeoutMs: o.timeoutMs ?? 15_000 } };
+}
+
+/** A sherpa-onnx streaming WebSocket server, with live words: `sherpaWebsocket({ url: "ws://asr.lan:6006" })`. */
+export function sherpaWebsocket(o: { url: string; padMs?: number; timeoutMs?: number }): EngineSpec<SherpaWsSttOptions> {
+  return { name: `sherpa-websocket ${o.url}`, module: builtin("sherpa-ws-stt"), options: { url: o.url, padMs: o.padMs ?? 300, timeoutMs: o.timeoutMs ?? 5000 } };
 }
 
 // --- voice activity ------------------------------------------------------------------------------
@@ -125,6 +168,16 @@ export function kokoro(o: { threads?: number; voices?: string[] } = {}): TtsSpec
 export function openaiSpeech(o: Partial<OpenAiSpeechOptions> & Pick<OpenAiSpeechOptions, "baseUrl">): TtsSpec {
   const options: OpenAiSpeechOptions = { model: "kokoro", sampleRate: 24000, ...o };
   return { name: "openai-speech", key: `openai-speech:${options.baseUrl}:${options.model}`, create: () => new OpenAiSpeech(options) };
+}
+
+/**
+ * A Wyoming speech server (wyoming-piper and others Home Assistant uses):
+ * `wyomingTts({ uri: "tcp://piper.lan:10200" })`, with tts.voice (or `voice` here) the server's voice
+ * name. Speed is the server's to set (piper's --length-scale): tts.speed doesn't apply.
+ */
+export function wyomingTts(o: { uri: string; voice?: string; speaker?: string; timeoutMs?: number }): TtsSpec {
+  const options: WyomingSpeechOptions = { ...hostPort(o.uri), voice: o.voice, speaker: o.speaker, timeoutMs: o.timeoutMs ?? 30_000 };
+  return { name: "wyoming-tts", key: `wyoming-tts:${o.uri}`, create: () => new WyomingSpeech(options) };
 }
 
 /** Every built-in engine's default spec, for `yap-bot models --defaults`. */

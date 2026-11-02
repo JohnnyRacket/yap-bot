@@ -48,15 +48,20 @@ export interface SttStream {
   /** More audio (16 kHz mono, -1…1). Called every 32 ms or so, so keep it quick. */
   accept(samples: Float32Array): void;
   /**
-   * The words so far. A streaming engine updates this as audio arrives: interruptions, the
-   * transcript wake word and live captions depend on it. Others can return "" until finish().
+   * The words so far. A streaming engine updates this as audio arrives (a remote one from its
+   * replies): talking over a reply interrupts it as soon as enough words are in, and devices show
+   * them live. An engine that only transcribes at the end returns "" until then; talking over a
+   * reply then interrupts once that utterance is over.
    */
   text(): string;
   /**
-   * The utterance is over: the final text. trailingSilence: samples of silence already at the
-   * end of what was accepted (some models need a little more to decode their last chunk).
+   * The utterance is over: the final text, now or (a remote service) when it arrives.
+   * trailingSilence: samples of silence already at the end of what was accepted (some models need
+   * a little more to decode their last chunk).
    */
-  finish(trailingSilence: number): string;
+  finish(trailingSilence: number): string | Promise<string>;
+  /** The utterance was dropped before finish(): release what it holds (a connection, a request). */
+  close?(): void;
 }
 
 export interface SttEngine {

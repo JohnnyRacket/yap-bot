@@ -7,7 +7,9 @@ import { defineVoice } from "yap-bot";
 //   turn: { detector: smartTurn() }                    end of turn (false: silence alone decides)
 //   wake: { spotter: sherpaKws() }                     wake word spotting (false: transcript only)
 //   tts: { engine: kokoro({ threads: 4 }) }            or openaiSpeech({ baseUrl, model, apiKey })
-// or an engine of your own (see EngineSpec and TtsSpec in yap-bot/engines).
+// Speech services on other machines: stt: wyomingStt({ uri }), openaiTranscription({ baseUrl, model }),
+// sherpaWebsocket({ url }); tts: { engine: wyomingTts({ uri }), voice: "en_US-lessac-medium" }.
+// Or an engine of your own (see EngineSpec and TtsSpec in yap-bot/engines).
 export default defineVoice({
   // Kokoro voices: af_heart af_bella af_nicole am_michael am_fenrir bf_emma bm_george
   tts: { voice: "af_heart", speed: 1.3, ackSpeed: 1.1 },

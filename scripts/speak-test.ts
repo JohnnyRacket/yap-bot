@@ -68,7 +68,7 @@ await c.waitFor((m) => m.type === "state" && m.state === "speaking", 60_000);
 const interruptAt = Date.now() + 2000;
 // a read-only ask: this runs against the real server, where a timer would later ring in every room
 const words = await speech("Okay stop. What's the weather today instead?");
-await new Promise((r) => setTimeout(r, interruptAt - Date.now()));
+await new Promise((r) => setTimeout(r, Math.max(0, interruptAt - Date.now())));
 const spokeAt = Date.now();
 const stopped = c.waitFor((m) => m.type === "stop", 10_000).then(() => Date.now());
 void mic.say(words);

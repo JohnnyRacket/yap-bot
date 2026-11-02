@@ -96,44 +96,57 @@ export function trimSilence(pcm: Int16Array, threshold = 500): Int16Array {
   return pcm.slice(Math.max(0, start - lead), Math.min(pcm.length, end + tail));
 }
 
-/** Linear resampling of an engine's PCM to TTS_SAMPLE_RATE, as it streams. */
+/**
+ * A streaming linear resampler for PCM s16le: feed it pieces as they come, get pieces at the new
+ * rate (carrying over what's needed between them).
+ */
+export function pcmResampler(from: number, to: number): (bytes: Uint8Array) => Uint8Array {
+  const ratio = from / to;
+  let carry = new Int16Array(0);
+  let pos = 0;
+  return (bytes) => {
+    const pcm = new Int16Array(carry.length + (bytes.byteLength >> 1));
+    pcm.set(carry);
+    pcm.set(new Int16Array(bytes.slice().buffer, 0, bytes.byteLength >> 1), carry.length);
+    const out: number[] = [];
+    for (; pos + 1 < pcm.length; pos += ratio) {
+      const i = Math.floor(pos);
+      out.push(Math.round(pcm[i] * (1 - (pos - i)) + pcm[i + 1] * (pos - i)));
+    }
+    const keep = Math.floor(pos);
+    carry = pcm.slice(keep);
+    pos -= keep;
+    return new Uint8Array(Int16Array.from(out).buffer);
+  };
+}
+
+/** An engine whose PCM comes at another rate, resampled to TTS_SAMPLE_RATE as it streams. */
 class Resampled implements TtsEngine {
   readonly name: string;
   readonly ready: Promise<void>;
   readonly sampleRate = TTS_SAMPLE_RATE;
   private engine: TtsEngine;
-  private ratio: number;
+  private from: number;
 
   constructor(engine: TtsEngine, from: number) {
     this.engine = engine;
     this.name = `${engine.name}, ${from} Hz resampled`;
     this.ready = engine.ready;
-    this.ratio = from / TTS_SAMPLE_RATE;
+    this.from = from;
   }
 
   async synthesize(text: string, o: SynthesizeOptions): Promise<number> {
-    let carry = new Int16Array(0);
-    let pos = 0;
-    let samples = 0;
+    const resample = pcmResampler(this.from, TTS_SAMPLE_RATE);
+    let bytes = 0;
     await this.engine.synthesize(text, {
       ...o,
-      onAudio: (bytes) => {
-        const pcm = new Int16Array(carry.length + (bytes.byteLength >> 1));
-        pcm.set(carry);
-        pcm.set(new Int16Array(bytes.slice().buffer, 0, bytes.byteLength >> 1), carry.length);
-        const out: number[] = [];
-        for (; pos + 1 < pcm.length; pos += this.ratio) {
-          const i = Math.floor(pos);
-          out.push(Math.round(pcm[i] * (1 - (pos - i)) + pcm[i + 1] * (pos - i)));
-        }
-        const keep = Math.floor(pos);
-        carry = pcm.slice(keep);
-        pos -= keep;
-        if (!out.length) return;
-        samples += out.length;
-        o.onAudio(new Uint8Array(Int16Array.from(out).buffer));
+      onAudio: (pcm) => {
+        const out = resample(pcm);
+        if (!out.byteLength) return;
+        bytes += out.byteLength;
+        o.onAudio(out);
       },
     });
-    return Math.round((samples / TTS_SAMPLE_RATE) * 1000);
+    return Math.round((bytes / 2 / TTS_SAMPLE_RATE) * 1000);
   }
 }
