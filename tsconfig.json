@@ -1,0 +1,21 @@
+{
+  // Type checking only: Node runs the .ts files directly (type stripping), Vite builds the web client.
+  // packages/yap-bot/tsconfig.build.json emits the published dist/.
+  "compilerOptions": {
+    "target": "es2024",
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "lib": ["es2024", "dom", "dom.iterable"],
+    "types": ["node"],
+    "strict": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true,
+    "skipLibCheck": true,
+    "noUncheckedIndexedAccess": false,
+    // "yap-bot" imports resolve to the source files in this repo
+    "customConditions": ["yap-bot-src"]
+  },
+  "include": ["packages/*/src/**/*.ts", "packages/yap-bot/template/**/*.ts", "scripts/**/*.ts", "examples/**/*.ts"]
+}

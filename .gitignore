@@ -1,0 +1,10 @@
+node_modules/
+dist/
+packages/yap-bot/web/
+models/
+data/
+*.log
+.env
+*.tgz
+packages/yap-bot/README.md
+packages/yap-bot/LICENSE

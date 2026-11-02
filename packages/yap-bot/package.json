@@ -1,0 +1,79 @@
+{
+  "name": "yap-bot",
+  "version": "0.1.0",
+  "description": "Declarative local voice agents: streaming speech in and out, turn taking, interruptions, wake words, tools, skills, schedules and triggers, with swappable speech engines.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "bin": {
+    "yap-bot": "./bin/yap-bot.js"
+  },
+  "exports": {
+    ".": {
+      "yap-bot-src": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./engines": {
+      "yap-bot-src": "./src/engines/index.ts",
+      "types": "./dist/engines/index.d.ts",
+      "default": "./dist/engines/index.js"
+    },
+    "./tools": {
+      "yap-bot-src": "./src/tools.ts",
+      "types": "./dist/tools.d.ts",
+      "default": "./dist/tools.js"
+    },
+    "./protocol": {
+      "yap-bot-src": "./src/protocol.ts",
+      "types": "./dist/protocol.d.ts",
+      "default": "./dist/protocol.js"
+    },
+    "./server": {
+      "yap-bot-src": "./src/start.ts",
+      "types": "./dist/start.d.ts",
+      "default": "./dist/start.js"
+    },
+    "./testing": {
+      "yap-bot-src": "./src/testing/index.ts",
+      "types": "./dist/testing/index.d.ts",
+      "default": "./dist/testing/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "bin",
+    "dist",
+    "web",
+    "template",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "prepack": "cp ../../README.md ../../LICENSE . && npm run build && npm run build -w @yap-bot/client-web --prefix ../.."
+  },
+  "dependencies": {
+    "croner": "^11.0.0",
+    "onnxruntime-node": "^1.31.1",
+    "phonemizer": "^1.2.1",
+    "selfsigned": "^5.5.0",
+    "sherpa-onnx-node": "2.0.1",
+    "ws": "^8.22.1",
+    "zod": "^4.6.7"
+  },
+  "keywords": [
+    "voice",
+    "assistant",
+    "agent",
+    "speech",
+    "tts",
+    "stt",
+    "llm",
+    "wake-word",
+    "kokoro",
+    "local"
+  ]
+}

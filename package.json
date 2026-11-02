@@ -1,0 +1,30 @@
+{
+  "name": "yap-bot-monorepo",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "yap-bot dev packages/yap-bot/template/agent",
+    "start": "yap-bot start packages/yap-bot/template/agent",
+    "dev:web": "npm run dev -w @yap-bot/client-web",
+    "build": "npm run build -w @yap-bot/client-web && npm run build -w yap-bot",
+    "typecheck": "tsc -p tsconfig.json",
+    "models": "yap-bot models --defaults",
+    "say": "yap-bot say",
+    "eval": "yap-bot eval packages/yap-bot/template/agent --cases packages/yap-bot/template/evals/cases.ts",
+    "speak-test": "node --conditions=yap-bot-src scripts/speak-test.ts"
+  },
+  "dependencies": {
+    "yap-bot": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "@types/ws": "^8.18.2",
+    "typescript": "^7.0.2"
+  }
+}

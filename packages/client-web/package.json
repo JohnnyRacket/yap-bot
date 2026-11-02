@@ -1,0 +1,18 @@
+{
+  "name": "@yap-bot/client-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build"
+  },
+  "dependencies": {
+    "yap-bot": "*"
+  },
+  "devDependencies": {
+    "path-browserify": "^1.0.1",
+    "sherpa-onnx": "2.0.1",
+    "vite": "^8.3.5"
+  }
+}
