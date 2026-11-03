@@ -301,7 +301,8 @@ certificate after the warning; iOS Safari has been unreliable with self-signed c
 WebSockets, so test early, and if it fails give it a real certificate (`TLS_CERT`/`TLS_KEY` from
 mkcert, or put it behind a reverse proxy such as Caddy). The page asks for a tap before it can make
 sound (browsers require it), keeps the screen on while listening, and hides tool calls and timings
-unless Settings → Show details is on (or the page is opened with `?debug`).
+unless Settings → Show details is on (or the page is opened with `?debug`). `ui: { details: true }`
+in the agent turns them on for devices that haven't chosen, handy while building one.
 
 From code: `const { port, close } = await start({ agentDir, port: 0 })` from `yap-bot/server`.
 

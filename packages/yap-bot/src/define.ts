@@ -99,8 +99,8 @@ export interface AgentDefinition {
     /** The line in front of each user message: the date and time, and the room by default. */
     context(device: Device, at: Date, timezone: string): string;
   };
-  /** How devices show the agent. */
-  ui: { title: string; icon: string };
+  /** How devices show the agent. details: show tool calls and timings on devices that haven't chosen (Settings → Show details). */
+  ui: { title: string; icon: string; details?: boolean };
   /** Bearer token for POST /api/ask; unset, it refuses every request. Default: $YAP_API_SECRET. */
   apiSecret?: string;
   /**

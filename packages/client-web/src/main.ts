@@ -20,7 +20,10 @@ const settings = {
   /** Tool calls, timings and wake word settings: for whoever builds the agent. */
   details: saved.details ?? new URLSearchParams(location.search).has("debug"),
 };
-const save = () => localStorage.setItem("yap-bot", JSON.stringify(settings));
+/** The device hasn't chosen: the agent's default (ui.details) applies. */
+let detailsChosen = saved.details !== undefined || new URLSearchParams(location.search).has("debug");
+// details only once chosen here, so the agent's default keeps applying until then
+const save = () => localStorage.setItem("yap-bot", JSON.stringify({ ...settings, details: detailsChosen ? settings.details : undefined }));
 $<HTMLInputElement>("deviceId").value = settings.deviceId;
 $<HTMLInputElement>("room").value = settings.room;
 $<HTMLInputElement>("interruptions").checked = settings.interruptions;
@@ -30,13 +33,19 @@ $<HTMLInputElement>("details").checked = settings.details;
 document.body.classList.toggle("details", settings.details);
 $<HTMLInputElement>("details").addEventListener("change", () => {
   settings.details = $<HTMLInputElement>("details").checked;
+  detailsChosen = true;
   document.body.classList.toggle("details", settings.details);
   save();
 });
 const touch = matchMedia("(pointer: coarse)").matches;
 
 /** The agent's own name and emoji, from the server. */
-function brand(ui: { title: string; icon: string }) {
+function brand(ui: { title: string; icon: string; details?: boolean }) {
+  if (!detailsChosen && ui.details !== undefined) {
+    settings.details = ui.details;
+    $<HTMLInputElement>("details").checked = ui.details;
+    document.body.classList.toggle("details", ui.details);
+  }
   document.title = ui.title;
   $("brandName").textContent = ui.title;
   for (const el of document.querySelectorAll(".logo, .empty .big")) el.textContent = ui.icon;

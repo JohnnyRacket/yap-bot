@@ -91,8 +91,8 @@ export type ServerMessage =
       deviceId: string;
       room: string;
       agent: string;
-      /** How to show the agent: its title and an emoji. */
-      ui: { title: string; icon: string };
+      /** How to show the agent: its title and an emoji, and whether to show tool calls and timings by default. */
+      ui: { title: string; icon: string; details?: boolean };
       wakeWord: string;
       /** Absent when the agent has no keywords or the server has no keyword spotter model. */
       deviceWake?: DeviceWakeConfig;
