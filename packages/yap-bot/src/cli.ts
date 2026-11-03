@@ -132,7 +132,12 @@ async function say(url: string, turns: string[], room?: string, token?: string) 
       if (msg.llm) console.log(`  🧠 ${JSON.stringify(msg.llm)}`);
     }
   };
-  await c.connect(token ? `${url}${url.includes("?") ? "&" : "?"}token=${encodeURIComponent(token)}` : url, `cli-${process.pid}`, "push", room);
+  try {
+    await c.connect(token ? `${url}${url.includes("?") ? "&" : "?"}token=${encodeURIComponent(token)}` : url, `cli-${process.pid}`, "push", room);
+  } catch (e) {
+    const needsToken = /device token/.test(c.closed ?? "");
+    fail(needsToken ? `${c.closed}: pass --token, or set YAP_DEVICE_TOKEN` : `couldn't connect to ${url}: ${(e as Error).message}`);
+  }
   for (const text of turns) {
     console.log(`> ${text}`);
     c.send({ type: "text", text });
@@ -149,7 +154,10 @@ function init(dir: string, name = basename(dir)) {
   for (const f of ["agent/agent.ts", "agent/instructions.md", "README.md"]) fill(f);
   const npmName = name.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "") || "agent";
   // an image tag can't have capitals or spaces
-  writeFileSync(join(dir, "deploy/Dockerfile"), readFileSync(join(dir, "deploy/Dockerfile"), "utf8").replaceAll("Yappy", npmName));
+  writeFileSync(
+    join(dir, "deploy/Dockerfile"),
+    readFileSync(join(dir, "deploy/Dockerfile"), "utf8").replaceAll("Yappy", npmName).replaceAll("YAP_BOT_VERSION", pkg.version),
+  );
   // npm leaves .gitignore files out of packages, so the template's go without the dot
   renameSync(join(dir, "gitignore"), join(dir, ".gitignore"));
   renameSync(join(dir, "env.example"), join(dir, ".env.example"));
@@ -161,6 +169,9 @@ function init(dir: string, name = basename(dir)) {
     scripts: { dev: "yap-bot dev", start: "yap-bot start", models: "yap-bot models", say: "yap-bot say", eval: "yap-bot eval", typecheck: "tsc" },
     dependencies: { "yap-bot": `^${pkg.version}` },
     devDependencies: { "@types/node": "^26.6.6", typescript: "^7.0.2" },
+    // npm 11 holds back install scripts until approved; onnxruntime-node's only fetches CUDA
+    // libraries (the CPU ones come in the package), so it's declined up front instead of warned about
+    allowScripts: { "onnxruntime-node": false },
   };
   writeFileSync(join(dir, "package.json"), JSON.stringify(projectPkg, null, 2) + "\n");
   console.log(`created ${dir}\n\n  cd ${dir}\n  npm install\n  cp .env.example .env      # then set LLM_URL and LLM_MODEL in it\n  npm run dev\n\nthen open https://localhost:8450`);

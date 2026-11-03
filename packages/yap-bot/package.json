@@ -1,6 +1,6 @@
 {
   "name": "yap-bot",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Declarative local voice agents: streaming speech in and out, turn taking, interruptions, wake words, tools, skills, schedules and triggers, with swappable speech engines.",
   "license": "MIT",
   "repository": {

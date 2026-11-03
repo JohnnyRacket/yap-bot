@@ -13,7 +13,9 @@ export interface Event {
 export class TestClient {
   ws!: WebSocket;
   events: Event[] = [];
-  private waiters: { pred: (m: ServerMessage) => boolean; resolve: (m: ServerMessage) => void }[] = [];
+  private waiters: { pred: (m: ServerMessage) => boolean; resolve: (m: ServerMessage) => void; reject: (e: Error) => void }[] = [];
+  /** Why the server closed the connection, once it has. */
+  closed?: string;
   /** chunkId → samples received, and the playback clock */
   private chunks = new Map<number, { samples: number; ended: boolean; durationMs?: number }>();
   private order: number[] = [];
@@ -27,6 +29,11 @@ export class TestClient {
     await new Promise((res, rej) => {
       this.ws.once("open", res);
       this.ws.once("error", rej);
+    });
+    // a refusal (wrong device token) or a server going away fails what's waiting at once, with why
+    this.ws.on("close", (code, reason) => {
+      this.closed = reason.toString() || `closed (${code})`;
+      for (const w of this.waiters.splice(0)) w.reject(new Error(`the server closed the connection: ${this.closed}`));
     });
     this.ws.on("message", (data: Buffer, isBinary) => {
       if (isBinary) {
@@ -67,8 +74,9 @@ export class TestClient {
 
   waitFor(pred: (m: ServerMessage) => boolean, timeoutMs = 60_000): Promise<ServerMessage> {
     return new Promise((resolve, reject) => {
+      if (this.closed !== undefined) return reject(new Error(`the server closed the connection: ${this.closed}`));
       const t = setTimeout(() => reject(new Error("timed out waiting")), timeoutMs);
-      this.waiters.push({ pred, resolve: (m) => (clearTimeout(t), resolve(m)) });
+      this.waiters.push({ pred, resolve: (m) => (clearTimeout(t), resolve(m)), reject: (e) => (clearTimeout(t), reject(e)) });
     });
   }
 

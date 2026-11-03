@@ -207,6 +207,11 @@ test("a device token keeps out devices without it", async () => {
       ws.onclose = (e) => resolve(e.code);
     });
     assert.equal(closed, 4401);
+    // a client turned away hears why at once, not after a timeout
+    const refused = new TestClient();
+    const t0 = Date.now();
+    await assert.rejects(refused.connect(`ws://127.0.0.1:${server.port}/ws?token=nope`, "no-token", "push"), /device token needed/);
+    assert.ok(Date.now() - t0 < 2000);
     const c = new TestClient();
     await c.connect(`ws://127.0.0.1:${server.port}/ws?token=letmein`, "with-token", "push");
     clients.push(c);
