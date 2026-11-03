@@ -27,6 +27,10 @@ export class CachedTts implements TtsEngine {
     this.ready = engine.ready;
   }
 
+  close() {
+    return this.engine.close?.();
+  }
+
   private key(text: string, voice: string, speed: number) {
     return `${voice}|${speed}|${text.trim().toLowerCase()}`;
   }
@@ -127,6 +131,10 @@ class Resampled implements TtsEngine {
   readonly sampleRate = TTS_SAMPLE_RATE;
   private engine: TtsEngine;
   private from: number;
+
+  close() {
+    return this.engine.close?.();
+  }
 
   constructor(engine: TtsEngine, from: number) {
     this.engine = engine;

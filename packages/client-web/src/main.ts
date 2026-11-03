@@ -103,9 +103,17 @@ spotter.onWake = (keyword, pcm) => {
 };
 spotter.onChange = () => updateHint();
 
+// The agent's device token, when it has one: from a link (#token=…) once, then remembered here.
+const linkToken = new URLSearchParams(location.hash.slice(1)).get("token");
+if (linkToken) {
+  localStorage.setItem("yap-bot-token", linkToken);
+  history.replaceState(null, "", location.pathname + location.search);
+}
+
 function connect() {
   ws?.close();
-  const sock = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`);
+  const token = localStorage.getItem("yap-bot-token");
+  const sock = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws${token ? `?token=${encodeURIComponent(token)}` : ""}`);
   sock.binaryType = "arraybuffer";
   ws = sock;
   setConn("connecting…", "");
@@ -114,8 +122,15 @@ function connect() {
     wakePending = false;
     send({ type: "hello", deviceId: settings.deviceId, room: settings.room, mode: settings.mode, interruptions: settings.interruptions, wakeDetector: detector() });
   };
-  sock.onclose = () => {
+  sock.onclose = (e) => {
     if (ws !== sock) return;
+    // the agent wants its access token (or a different one)
+    if (e.code === 4401) {
+      const given = prompt("This assistant needs its access code:");
+      if (!given) return setConn("needs the access code (reload to enter it)", "bad");
+      localStorage.setItem("yap-bot-token", given.trim());
+      return connect();
+    }
     setConn("disconnected, retrying…", "bad");
     setTimeout(() => ws === sock && connect(), 1500);
   };

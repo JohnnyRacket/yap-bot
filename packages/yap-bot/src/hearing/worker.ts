@@ -5,6 +5,10 @@ import { parentPort, Worker } from "node:worker_threads";
 import type { ListenMode } from "../protocol.ts";
 import type { EngineEnv, EngineSpec, KwsEngine, KwsStream, SttEngine, SttStream, VadEngine, VadStream } from "../engines/types.ts";
 import type { FromHearing, HearingConfig, ToHearing, TurnReason } from "./messages.ts";
+import { useSourceConditions } from "../source-conditions.ts";
+
+// engine modules may import "yap-bot"
+useSourceConditions();
 
 const SR = 16000;
 // Recent audio kept so a new utterance doesn't clip its first word: 0.5 s when the speech detector

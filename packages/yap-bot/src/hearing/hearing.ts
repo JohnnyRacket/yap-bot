@@ -60,6 +60,11 @@ export class Hearing {
     this.post({ type: "push", sid, down });
   }
 
+  /** Stops the worker (and the turn detector's, inside it). */
+  terminate() {
+    return this.worker.terminate();
+  }
+
   close(sid: string) {
     this.listeners.delete(sid);
     this.post({ type: "close", sid });

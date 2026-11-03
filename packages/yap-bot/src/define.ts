@@ -89,6 +89,8 @@ export interface AgentDefinition {
   timezone: string;
   /** Conversation messages kept per device. */
   historyMessages: number;
+  /** Model rounds per turn (each one may call tools) before it gives up. */
+  maxToolRounds: number;
   prompt: {
     /** How to talk out loud, added after the instructions; false to leave it to the instructions. */
     voiceRules: string | false;
@@ -99,6 +101,12 @@ export interface AgentDefinition {
   ui: { title: string; icon: string };
   /** Bearer token for POST /api/ask; unset, it refuses every request. Default: $YAP_API_SECRET. */
   apiSecret?: string;
+  /**
+   * Devices must present this to connect (the web page asks once and remembers it, or open it as
+   * https://host:8450/#token=…). Unset, anyone who can reach the server can talk to the agent and so
+   * run its tools. Default: $YAP_DEVICE_TOKEN.
+   */
+  deviceToken?: string;
 }
 
 export const DEFAULT_VOICE_RULES = `You are talking out loud: everything you write is spoken by a speaker.
@@ -144,10 +152,13 @@ export interface AgentInput {
   timezone?: string;
   /** Default 40. */
   historyMessages?: number;
+  /** Default 6. */
+  maxToolRounds?: number;
   prompt?: Partial<AgentDefinition["prompt"]>;
   /** Default: the name and 🗣️. */
   ui?: Partial<AgentDefinition["ui"]>;
   apiSecret?: string;
+  deviceToken?: string;
 }
 
 export function defineAgent(def: AgentInput): AgentDefinition {
@@ -164,9 +175,11 @@ export function defineAgent(def: AgentInput): AgentDefinition {
     followUpMs: def.followUpMs ?? 8000,
     timezone: def.timezone ?? process.env.TZ ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
     historyMessages: def.historyMessages ?? 40,
+    maxToolRounds: def.maxToolRounds ?? 6,
     prompt: { voiceRules: DEFAULT_VOICE_RULES, context: defaultTurnContext, ...def.prompt },
     ui: { title: def.name, icon: "🗣️", ...def.ui },
     apiSecret: def.apiSecret ?? (process.env.YAP_API_SECRET || undefined),
+    deviceToken: def.deviceToken ?? (process.env.YAP_DEVICE_TOKEN || undefined),
   };
 }
 
@@ -291,6 +304,8 @@ export interface ToolDefinition<S extends z.ZodType = z.ZodType> {
   ack?: string | string[] | false;
   /** The turn ends after this tool instead of going back to the model (when it's the only kind called). */
   final?: boolean;
+  /** How long it may run before the model is told it timed out (default 20 s). ctx.signal is aborted then too. */
+  timeoutMs?: number;
 }
 
 export function defineTool<S extends z.ZodType>(def: Omit<ToolDefinition<S>, "kind">): ToolDefinition<S> {

@@ -42,13 +42,17 @@ export class Triggers {
 
   /** (Re)starts the periodic ones; called on load and on every agent reload. */
   start() {
-    for (const i of this.intervals) clearInterval(i);
-    this.intervals = [];
+    this.stop();
     for (const { name, def } of this.list) {
       if (!def.on.every) continue;
       const ms = parseDuration(def.on.every);
       this.intervals.push(setInterval(() => void this.fire(name, def, { source: "every" }), Math.max(1000, ms)));
     }
+  }
+
+  stop() {
+    for (const i of this.intervals) clearInterval(i);
+    this.intervals = [];
   }
 
   handles(event: TriggerEventName) {

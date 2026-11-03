@@ -56,6 +56,9 @@ interface Turn {
   leadChecked: boolean;
   /** The conversation is over: go back to sleep (wake mode) instead of the follow-up window. */
   sleep: boolean;
+  /** Tools called, for the log ("name!" when it failed). */
+  tools: string[];
+  createdAt: number;
 }
 
 /** How many of the latest acks a new one avoids repeating (when the tool has others to pick). */
@@ -351,6 +354,8 @@ export class Session {
       acked: false,
       leadChecked: false,
       sleep: false,
+      tools: [],
+      createdAt: Date.now(),
     };
     this.turn = turn;
     return turn;
@@ -432,7 +437,11 @@ export class Session {
         onFirstToken: (at) => turn.marks.push({ name: "llm_first_token", at }),
         onToolCalling: (name) => this.ack(turn, name),
         onToolStart: (name, input) => this.mark(turn, "tool_start", name) && this.send({ type: "tool", turnId: turn.id, name, input }),
-        onToolEnd: (name, input, r) => this.send({ type: "tool", turnId: turn.id, name, input, output: r.output, error: r.error, ms: r.ms }),
+        onToolEnd: (name, input, r) => {
+          turn.tools.push(r.error !== undefined ? `${name}!` : name);
+          if (r.error !== undefined) log.warn(`[${this.device.id}] tool ${name}(${JSON.stringify(input)}) failed: ${r.error}`);
+          this.send({ type: "tool", turnId: turn.id, name, input, output: r.output, error: r.error, ms: r.ms });
+        },
         onMessage: (m) => history.push(m),
       },
     });
@@ -601,11 +610,26 @@ export class Session {
     this.send({ type: "turn_done", turnId: turn.id, interrupted, spoken });
     this.send({ type: "metrics", turnId: turn.id, marks: turn.marks, llm: turn.stats });
     if (this.turn === turn) this.turn = null;
+    if (turn.kind === "turn") this.logTurn(turn, spoken, interrupted);
     if (turn.kind === "turn") {
       this.hub.reg.voice.hooks.afterTurn?.({ turnId: turn.id, device: this.device, text: turn.userText, spoken, interrupted });
     }
     this.afterTurnState(turn.sleep);
     this.nextAnnouncement();
+  }
+
+  /** One line per turn: what was heard, the tools it called, what was said, and how soon. */
+  private logTurn(turn: Turn, spoken: string, interrupted: boolean) {
+    const at = (name: string) => turn.marks.find((m) => m.name === name)?.at;
+    const from = at("speech_end") ?? turn.createdAt;
+    const first = at("tts_first_audio");
+    const tools = turn.tools.length ? ` → ${turn.tools.join(", ")}` : at("fastpath") ? " → (fastpath)" : "";
+    const reply = spoken || turn.finalText;
+    const clip = (t: string) => (t.length > 160 ? `${t.slice(0, 160)}…` : t);
+    log.info(
+      `[${this.device.id}] "${clip(turn.userText)}"${tools} → ${reply ? `"${clip(reply)}"` : "(nothing said)"}` +
+        `${interrupted ? " (interrupted)" : ""} · ${first ? `first sound ${((first - from) / 1000).toFixed(2)} s, ` : ""}${((Date.now() - from) / 1000).toFixed(1)} s`,
+    );
   }
 
   private afterTurnState(sleep = false) {

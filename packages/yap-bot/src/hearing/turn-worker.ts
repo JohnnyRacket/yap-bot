@@ -1,6 +1,9 @@
 // The end-of-turn engine in its own thread, so judging a pause never waits behind speech decoding.
 import { parentPort, workerData } from "node:worker_threads";
 import type { EngineSpec, TurnEngine, TurnFactory } from "../engines/types.ts";
+import { useSourceConditions } from "../source-conditions.ts";
+
+useSourceConditions();
 
 const port = parentPort!;
 const { spec, modelsDir } = workerData as { spec: EngineSpec; modelsDir: string };

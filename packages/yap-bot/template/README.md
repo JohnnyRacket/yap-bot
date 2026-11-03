@@ -4,12 +4,16 @@ A voice agent on [yap-bot](https://www.npmjs.com/package/yap-bot).
 
 ```sh
 npm install
-LLM_URL=http://localhost:8080/v1 LLM_MODEL=your-model npm run dev   # https://localhost:8450
-npm run say -- "set a timer for ten minutes"                          # a typed turn, from another shell
-npm run eval                                                          # does the model pick the right tools?
+cp .env.example .env                              # set LLM_URL and LLM_MODEL (and your tools' secrets)
+npm run dev                                       # https://localhost:8450
+npm run say -- "set a timer for ten minutes"      # a typed turn, from another shell
+npm run eval                                      # does the model pick the right tools?
 ```
 
 The first start downloads the speech models (~1 GB) into `~/.cache/yap-bot/models` (or `$MODELS_DIR`).
+Each turn is logged on one line: what was heard, the tools called (`name!` when one failed), what
+was said, and how soon. Set `YAP_DEVICE_TOKEN` before the agent is reachable by anyone else: its
+tools act on your accounts.
 
 | Path | What |
 |---|---|

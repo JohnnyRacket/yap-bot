@@ -32,7 +32,10 @@ export interface HubOptions {
 /** Everything the voice's engines need downloaded. */
 export function voiceDownloads(reg: Registry): ModelDownload[] {
   const v = reg.voice;
-  return [v.stt, v.vad, v.turn.detector, v.wake.spotter, v.tts.engine].flatMap((e) => (e ? (e.downloads ?? []) : []));
+  return [
+    ...[v.stt, v.vad, v.turn.detector, v.wake.spotter, v.tts.engine].flatMap((e) => (e ? (e.downloads ?? []) : [])),
+    ...(v.tts.engine.downloadsFor?.(v.tts.voice) ?? []),
+  ];
 }
 
 export class Hub {
@@ -50,6 +53,7 @@ export class Hub {
   /** What those devices need; absent without keywords or a model. */
   deviceWake?: DeviceWakeConfig;
   private crons: Cron[] = [];
+  private stopWatching?: () => void;
   private opts: HubOptions;
 
   private constructor(opts: HubOptions) {
@@ -80,11 +84,23 @@ export class Hub {
     hub.timers = new TimerService(opts.dataDir, (t) => hub.timerDone(t));
     hub.startSchedules();
     hub.triggers.start();
-    if (opts.watch) watchAgent(opts.agentDir, () => void hub.reload());
+    if (opts.watch) hub.stopWatching = watchAgent(opts.agentDir, () => void hub.reload());
     await Promise.all([hub.hearing.ready, hub.tts.ready]);
     log.info(`speech: ${hub.tts.name}`);
     void hub.warmAcks();
     return hub;
+  }
+
+  /** Stops everything it started: schedules, triggers, timers, the file watcher, sessions and the engines. */
+  async close() {
+    for (const c of this.crons) c.stop();
+    this.crons = [];
+    this.triggers.stop();
+    this.timers.stop();
+    this.stopWatching?.();
+    for (const s of this.sessions.values()) s.close();
+    this.sessions.clear();
+    await Promise.all([this.hearing.terminate(), this.tts.close()]);
   }
 
   storeFor(name: string): Store {
@@ -104,7 +120,10 @@ export class Hub {
       const voiceKey = (r: Registry) =>
         JSON.stringify([r.voice.stt, r.voice.vad, r.voice.turn, r.voice.wake, r.voice.tts.engine.key ?? r.voice.tts.engine.name, r.agent.wake.keywords, r.agent.wake.keywordBoost, r.agent.wake.keywordThreshold]);
       const prevVoice = voiceKey(this.reg);
-      this.reg = await loadAgent(this.opts.agentDir);
+      const reg = await loadAgent(this.opts.agentDir);
+      // a voice picked since (tts.voice applies live) may need fetching first
+      if (this.opts.download !== false) await downloadModels(this.opts.modelsDir, voiceDownloads(reg));
+      this.reg = reg;
       this.logAgent();
       if (voiceKey(this.reg) !== prevVoice) log.warn("voice engines, turn or wake keyword settings changed: they apply after a restart (tts voice and speed apply now)");
       this.startSchedules();

@@ -151,6 +151,7 @@ export async function loadAgent(dir: string): Promise<Registry> {
   for (const f of files(join(dir, "tools"), [".ts"])) {
     const name = basename(f, ".ts");
     if (!NAME.test(name)) throw new Error(`${f}: tool names use letters, digits, _ and -`);
+    if (tools.some((t) => t.name === name)) throw new Error(`${f}: there's already a tool named ${name} (a tool's name is its file name, folders aside)`);
     const def = await importDefault(f, v);
     expectKind(def, "tool", f);
     tools.push({ name, def });
@@ -230,11 +231,15 @@ export async function loadAgent(dir: string): Promise<Registry> {
   return { agent, voice, instructions, tools, skills, fastpaths, schedules, triggers };
 }
 
-/** Calls onChange (debounced) whenever anything under dir changes. */
-export function watchAgent(dir: string, onChange: () => void) {
+/** Calls onChange (debounced) whenever anything under dir changes; returns a function that stops watching. */
+export function watchAgent(dir: string, onChange: () => void): () => void {
   let timer: NodeJS.Timeout | undefined;
-  watch(dir, { recursive: true }, () => {
+  const watcher = watch(dir, { recursive: true }, () => {
     clearTimeout(timer);
     timer = setTimeout(onChange, 250);
   });
+  return () => {
+    clearTimeout(timer);
+    watcher.close();
+  };
 }

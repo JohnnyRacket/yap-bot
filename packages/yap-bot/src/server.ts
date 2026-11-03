@@ -23,6 +23,12 @@ const MIME: Record<string, string> = {
   ".wasm": "application/wasm",
 };
 
+function sameSecret(given: string, secret: string) {
+  const a = Buffer.from(given);
+  const b = Buffer.from(secret);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
 export interface ServerOptions {
   port: number;
   webDir: string;
@@ -127,8 +133,7 @@ async function ask(hub: Hub, req: IncomingMessage, res: ServerResponse) {
   if (req.method !== "POST") return reply(405, { error: "use POST" });
   const secret = hub.reg.agent.apiSecret;
   if (!secret) return reply(401, { error: "the agent has no apiSecret (or YAP_API_SECRET), so /api/ask refuses every request" });
-  const given = Buffer.from(req.headers.authorization?.replace(/^Bearer\s+/i, "") ?? "");
-  if (given.length !== secret.length || !timingSafeEqual(given, Buffer.from(secret))) return reply(401, { error: "bad or missing token" });
+  if (!sameSecret(req.headers.authorization?.replace(/^Bearer\s+/i, "") ?? "", secret)) return reply(401, { error: "bad or missing token" });
   let body: { text?: unknown; room?: unknown };
   try {
     body = JSON.parse((await readBody(req)) || "{}");
@@ -155,7 +160,9 @@ export async function startServer(hub: Hub, o: ServerOptions) {
     if (req.url?.startsWith("/models/kws/")) return serveKwsModel(hub, req, res);
     if (req.url === "/health") {
       res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: true, agent: hub.reg.agent.name, devices: [...hub.sessions.values()].map((s) => s.device) }));
+      // which devices are connected only when anyone may connect anyway
+      const devices = hub.reg.agent.deviceToken ? undefined : [...hub.sessions.values()].map((s) => s.device);
+      res.end(JSON.stringify({ ok: true, agent: hub.reg.agent.name, devices }));
       return;
     }
     serveStatic(o.webDir, req, res);
@@ -167,7 +174,30 @@ export async function startServer(hub: Hub, o: ServerOptions) {
     server = createHttps({ cert, key }, handler);
   }
   const wss = new WebSocketServer({ server, path: "/ws", maxPayload: 4 * 1024 * 1024 });
-  wss.on("connection", (ws) => hub.attach(ws));
-  await new Promise<void>((resolve) => server.listen(o.port, resolve));
-  log.info(`listening on ${o.tls === "off" ? "http" : "https"}://0.0.0.0:${o.port}`);
+  wss.on("connection", (ws, req) => {
+    const token = hub.reg.agent.deviceToken;
+    if (token) {
+      const given = new URL(req.url ?? "/", "http://x").searchParams.get("token") ?? "";
+      if (!sameSecret(given, token)) {
+        log.warn(`refused a device from ${req.socket.remoteAddress}: ${given ? "wrong" : "no"} device token`);
+        return ws.close(4401, "device token needed");
+      }
+    }
+    hub.attach(ws);
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(o.port, resolve);
+  });
+  const port = (server.address() as import("node:net").AddressInfo).port;
+  log.info(`listening on ${o.tls === "off" ? "http" : "https"}://0.0.0.0:${port}`);
+  return {
+    port,
+    close: async () => {
+      for (const ws of wss.clients) ws.terminate();
+      wss.close();
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    },
+  };
 }

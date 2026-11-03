@@ -1,0 +1,114 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { createServer } from "node:net";
+import { parseFrontmatter } from "../src/agent/loader.ts";
+import { trimHistory } from "../src/agent/prompt.ts";
+import { dropLeadingAck } from "../src/session.ts";
+import { fill, parseDuration } from "../src/triggers.ts";
+import { SentenceSplitter } from "../src/speech/splitter.ts";
+import { pcmResampler, trimSilence } from "../src/speech/tts.ts";
+import { spokenDuration } from "../src/services/timers.ts";
+import { WyomingClient } from "../src/engines/wyoming.ts";
+import { defineAgent, defineVoice, defineTrigger } from "../src/define.ts";
+import type { ChatMessage } from "../src/llm/client.ts";
+
+test("frontmatter: values, inline lists and dash lists", () => {
+  const { data, body } = parseFrontmatter("---\ncron: '0 7 * * *'\nkeywords: [a, b]\nrooms:\n  - kitchen\n  - office\n---\nThe body.\n");
+  assert.deepEqual(data, { cron: "0 7 * * *", keywords: ["a", "b"], rooms: ["kitchen", "office"] });
+  assert.equal(body, "The body.");
+  assert.deepEqual(parseFrontmatter("no frontmatter").data, {});
+});
+
+test("trimHistory drops back to half, starting at a user message", () => {
+  const h: ChatMessage[] = [];
+  for (let i = 0; i < 10; i++) h.push({ role: "user", content: `u${i}` }, { role: "assistant", content: `a${i}` });
+  const t = trimHistory(h, 8);
+  assert.equal(t[0].role, "user");
+  assert.ok(t.length <= 4);
+  assert.equal(trimHistory(h.slice(0, 4), 8).length, 4);
+});
+
+test("dropLeadingAck removes a repeated okay", () => {
+  assert.equal(dropLeadingAck("OK, I've set it."), "I've set it.");
+  assert.equal(dropLeadingAck("Okay."), "");
+  assert.equal(dropLeadingAck("Okra is a vegetable."), "Okra is a vegetable.");
+});
+
+test("trigger templates and durations", () => {
+  assert.equal(fill("{{payload.who}} at {{payload.where}}", { source: "webhook", payload: { who: "Sam", where: "door" }, query: {} }), "Sam at door");
+  assert.equal(fill("{{payload}}", { source: "webhook", payload: { a: 1 }, query: {} }), '{"a":1}');
+  assert.equal(parseDuration("5m"), 300_000);
+  assert.equal(parseDuration("1.5h"), 5_400_000);
+  assert.throws(() => parseDuration("5 minutes"));
+});
+
+test("sentence splitter cuts at sentence ends", () => {
+  const out: string[] = [];
+  const s = new SentenceSplitter((p) => out.push(p));
+  for (const piece of ["Hello there. It is 3.5 deg", "rees today! What", " now"]) s.push(piece);
+  s.flush();
+  assert.ok(out.length >= 2, JSON.stringify(out));
+  assert.equal(out.join(" ").replace(/\s+/g, " "), "Hello there. It is 3.5 degrees today! What now");
+});
+
+test("resampler keeps the length in proportion, across pieces", () => {
+  const r = pcmResampler(16000, 24000);
+  let samples = 0;
+  for (let i = 0; i < 10; i++) samples += r(new Uint8Array(new Int16Array(1600).fill(1000).buffer)).byteLength / 2;
+  assert.ok(Math.abs(samples - 24000) < 4, `${samples}`);
+});
+
+test("trimSilence keeps the speech", () => {
+  const pcm = new Int16Array(24000);
+  pcm.fill(5000, 10000, 12000);
+  const t = trimSilence(pcm);
+  assert.ok(t.length < pcm.length && t.length >= 2000);
+});
+
+test("spokenDuration", () => {
+  assert.equal(spokenDuration(90_000), "1 minute 30 seconds");
+  assert.equal(spokenDuration(3_660_000), "1 hour 1 minute");
+});
+
+test("defaults: defineAgent and defineVoice", () => {
+  const a = defineAgent({ name: "x", model: { id: "m" } });
+  assert.equal(a.wake.word, "computer");
+  assert.equal(a.ui.title, "x");
+  const custom = defineAgent({ name: "x", wake: { word: "jarvis" } });
+  assert.equal(custom.wake.keywords, undefined, "a custom wake word doesn't inherit computer's spotter tokens");
+  const v = defineVoice();
+  assert.equal(v.tts.voice, "af_heart");
+  assert.ok(v.turn.detector);
+  assert.throws(() => defineTrigger({ on: {}, announce: "x" }));
+});
+
+test("kokoro fetches the voice that's picked", async () => {
+  const { kokoro } = await import("../src/engines/index.ts");
+  const spec = kokoro({ voices: ["af_heart"] });
+  assert.deepEqual(spec.downloadsFor?.("am_puck").map((d) => d.path), ["kokoro/voices/am_puck.bin"]);
+  assert.deepEqual(spec.downloadsFor?.("not a voice"), []);
+});
+
+test("wyoming events: split data and payload, in pieces", async () => {
+  const server = createServer((sock) => {
+    sock.on("data", () => {
+      const data = Buffer.from(JSON.stringify({ rate: 16000, width: 2, channels: 1 }));
+      const header = Buffer.from(JSON.stringify({ type: "audio-chunk", data_length: data.length, payload_length: 4 }) + "\n");
+      const all = Buffer.concat([header, data, Buffer.from([1, 0, 2, 0]), Buffer.from('{"type":"audio-stop"}\n')]);
+      // byte by byte: the parser must wait for whole events
+      for (let i = 0; i < all.length; i++) sock.write(all.subarray(i, i + 1));
+      sock.end();
+    });
+  });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  const client = new WyomingClient("127.0.0.1", (server.address() as { port: number }).port);
+  client.send("synthesize", { text: "hi" });
+  const e1 = await client.next();
+  assert.equal(e1?.type, "audio-chunk");
+  assert.equal(e1?.data.rate, 16000);
+  assert.deepEqual([...(e1?.payload ?? [])], [1, 0, 2, 0]);
+  assert.equal((await client.next())?.type, "audio-stop");
+  assert.equal(await client.next(), null);
+  client.close();
+  server.close();
+});

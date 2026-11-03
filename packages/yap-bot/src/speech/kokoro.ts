@@ -33,6 +33,10 @@ export class KokoroLocal implements TtsEngine {
     });
   }
 
+  async close() {
+    await this.worker.terminate();
+  }
+
   async synthesize(text: string, o: SynthesizeOptions): Promise<number> {
     const id = ++this.seq;
     const r = await new Promise<{ audio?: Float32Array; error?: string }>((resolve) => {

@@ -5,7 +5,6 @@ import { chat, LlmQueue, Priority, type ChatMessage, type ToolCall } from "../ll
 import type { Registry } from "./loader.ts";
 import { LOAD_SKILL, systemPrompt, toolSpecs } from "./prompt.ts";
 
-const MAX_ROUNDS = 6;
 const TOOL_TIMEOUT_MS = 20_000;
 
 export interface LoopEvents {
@@ -53,7 +52,7 @@ export async function runLoop(opts: {
   const stats: LlmStats = { rounds: 0 };
   let firstTokenSeen = false;
 
-  for (let round = 0; round < MAX_ROUNDS; round++) {
+  for (let round = 0; round < reg.agent.maxToolRounds; round++) {
     ctx.signal.throwIfAborted();
     stats.rounds++;
     const res = await opts.llm.run(opts.priority, () =>
@@ -124,10 +123,19 @@ async function runTool(
   if (!parsed.success) return done({ error: `invalid input: ${parsed.error.message}` });
 
   let timeout: NodeJS.Timeout | undefined;
+  // the tool's own signal: the turn's, plus its timeout, so a fetch inside it stops too
+  const timedOut = new AbortController();
+  const signal = AbortSignal.any([ctx.signal, timedOut.signal]);
   try {
     const output = await Promise.race([
-      Promise.resolve(tool.execute(parsed.data, { ...ctx, store: storeFor(name) })),
-      new Promise((_, reject) => (timeout = setTimeout(() => reject(new Error("timed out")), TOOL_TIMEOUT_MS))),
+      Promise.resolve(tool.execute(parsed.data, { ...ctx, signal, store: storeFor(name) })),
+      new Promise((_, reject) =>
+        (timeout = setTimeout(() => {
+          // the timeout first: a tool that answers as soon as it's aborted mustn't count as done
+          reject(new Error(`timed out after ${(tool.timeoutMs ?? TOOL_TIMEOUT_MS) / 1000} s`));
+          timedOut.abort(new Error("timed out"));
+        }, tool.timeoutMs ?? TOOL_TIMEOUT_MS)),
+      ),
     ]);
     return done({ output });
   } catch (e) {

@@ -14,9 +14,13 @@ const HELP = `yap-bot: declarative voice agents
   yap-bot say "text" ["more"…]     typed turns to a running server (--url wss://host:8450/ws)
   yap-bot eval [agentDir]          tool-choice eval (--cases evals/cases.ts --reps 1 --only area)
 
-Environment: PORT (8450), AGENT_DIR, DATA_DIR (./data), MODELS_DIR (./models if present, else
-~/.cache/yap-bot/models), TLS=off, TLS_CERT/TLS_KEY, TLS_NAMES, WATCH=0, YAP_DOWNLOAD=0,
-LLM_URL, LLM_MODEL, LLM_API_KEY, YAP_API_SECRET (POST /api/ask), TZ.`;
+Environment (also read from ./.env): PORT (8450), AGENT_DIR, DATA_DIR (./data), MODELS_DIR
+(./models if present, else ~/.cache/yap-bot/models), TLS=off, TLS_CERT/TLS_KEY, TLS_NAMES, WATCH=0,
+YAP_DOWNLOAD=0, LLM_URL, LLM_MODEL, LLM_API_KEY, YAP_API_SECRET (POST /api/ask), YAP_DEVICE_TOKEN
+(devices must know it), TZ.`;
+
+// secrets and settings for the agent (API keys, logins); variables already set win
+if (existsSync(".env")) process.loadEnvFile(".env");
 
 const PKG_ROOT = new URL("../", import.meta.url);
 const pkg = JSON.parse(readFileSync(new URL("package.json", PKG_ROOT), "utf8")) as { version: string };
@@ -51,9 +55,14 @@ switch (command) {
     break;
   }
   case "say": {
-    const { values, positionals } = parseArgs({ args: rest, allowPositionals: true, options: { url: { type: "string" }, room: { type: "string" } } });
+    const { values, positionals } = parseArgs({
+      args: rest,
+      allowPositionals: true,
+      options: { url: { type: "string" }, room: { type: "string" }, token: { type: "string" } },
+    });
     if (!positionals.length) fail('usage: yap-bot say "first turn" ["second turn" …]');
-    await say(values.url ?? process.env.YAP_URL ?? `wss://localhost:${process.env.PORT || 8450}/ws`, positionals, values.room);
+    const scheme = process.env.TLS === "off" ? "ws" : "wss";
+    await say(values.url ?? process.env.YAP_URL ?? `${scheme}://localhost:${process.env.PORT || 8450}/ws`, positionals, values.room, values.token ?? process.env.YAP_DEVICE_TOKEN);
     break;
   }
   case "eval": {
@@ -94,7 +103,7 @@ function fail(message: string): never {
   process.exit(1);
 }
 
-async function say(url: string, turns: string[], room?: string) {
+async function say(url: string, turns: string[], room?: string, token?: string) {
   const { TestClient, formatMarks } = await import("./testing/client.ts");
   const c = new TestClient();
   c.onEvent = ({ msg }) => {
@@ -107,7 +116,7 @@ async function say(url: string, turns: string[], room?: string) {
       if (msg.llm) console.log(`  🧠 ${JSON.stringify(msg.llm)}`);
     }
   };
-  await c.connect(url, `cli-${process.pid}`, "push", room);
+  await c.connect(token ? `${url}${url.includes("?") ? "&" : "?"}token=${encodeURIComponent(token)}` : url, `cli-${process.pid}`, "push", room);
   for (const text of turns) {
     console.log(`> ${text}`);
     c.send({ type: "text", text });
@@ -122,8 +131,9 @@ function init(dir: string, name = basename(dir)) {
   cpSync(new URL("template/", PKG_ROOT), dir, { recursive: true });
   const fill = (file: string) => writeFileSync(join(dir, file), readFileSync(join(dir, file), "utf8").replaceAll("Yappy", name));
   for (const f of ["agent/agent.ts", "agent/instructions.md", "README.md", "deploy/Dockerfile"]) fill(f);
-  // npm leaves .gitignore files out of packages, so the template's goes without the dot
+  // npm leaves .gitignore files out of packages, so the template's go without the dot
   renameSync(join(dir, "gitignore"), join(dir, ".gitignore"));
+  renameSync(join(dir, "env.example"), join(dir, ".env.example"));
   const npmName = name.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "") || "agent";
   const projectPkg = {
     name: npmName,
@@ -135,5 +145,5 @@ function init(dir: string, name = basename(dir)) {
     devDependencies: { "@types/node": "^26.6.6", typescript: "^7.0.2" },
   };
   writeFileSync(join(dir, "package.json"), JSON.stringify(projectPkg, null, 2) + "\n");
-  console.log(`created ${dir}\n\n  cd ${dir}\n  npm install\n  LLM_URL=http://localhost:8080/v1 LLM_MODEL=your-model npm run dev\n\nthen open https://localhost:8450`);
+  console.log(`created ${dir}\n\n  cd ${dir}\n  npm install\n  cp .env.example .env      # then set LLM_URL and LLM_MODEL in it\n  npm run dev\n\nthen open https://localhost:8450`);
 }

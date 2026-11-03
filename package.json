@@ -17,7 +17,8 @@
     "models": "yap-bot models --defaults",
     "say": "yap-bot say",
     "eval": "yap-bot eval packages/yap-bot/template/agent --cases packages/yap-bot/template/evals/cases.ts",
-    "speak-test": "node --conditions=yap-bot-src scripts/speak-test.ts"
+    "speak-test": "node --conditions=yap-bot-src scripts/speak-test.ts",
+    "test": "npm test -w yap-bot"
   },
   "dependencies": {
     "yap-bot": "*"

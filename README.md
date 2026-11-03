@@ -67,7 +67,10 @@ export default defineTool({
 
 A tool's `ctx` has `device` (id, room), `timezone`, `timers`, `store`, `say()` (speak mid-turn),
 `announce()` (speak in a room or everywhere), `sleep()` (back to waiting for the wake word after
-this turn), `signal` (aborted on interruption) and `log()`.
+this turn), `signal` (aborted on interruption or timeout: pass it to `fetch`) and `log()`. A tool
+gets 20 s (`timeoutMs` to change it); a turn gets 6 model rounds (`maxToolRounds` in the agent).
+What a tool returns goes back to the model as JSON; throw, or return `{ error }`, and the model is
+told what went wrong. Secrets for tools go in `.env`, read as `process.env.NAME`.
 
 **Ready-made** in `yap-bot/tools` (a one-line file gives each its name):
 `endConversation`, `setTimer`, `listTimers`, `cancelTimer`, `webSearch({ searxngUrl })`, and the
@@ -92,6 +95,26 @@ text body, available as `{{payload}}` / `{{payload.field}}`; with `secret_env`, 
 **`POST /api/ask`** `{"text": "…", "room": "kitchen"}` runs one typed turn (tools run for real) and
 answers with the reply and the tool calls. It needs `Authorization: Bearer <apiSecret>` (default
 `$YAP_API_SECRET`).
+
+## Running, configuring, securing
+
+`yap-bot dev` and `start` read `./.env` (variables set in the shell win); `yap-bot init` adds a
+`.env.example`. Each turn is logged on one line: what was heard, the tools called (`name!` when
+one failed, with the error logged above it), what was said, and how soon the first sound came.
+`DEBUG=1` logs more.
+
+**Who can talk to it.** Without a device token, anyone who can reach the port can talk to the
+agent and so run its tools. Set `YAP_DEVICE_TOKEN` (or `deviceToken` in the agent): devices must
+present it. The web page asks for it once and remembers it, or open it once as
+`https://host:8450/#token=…`; `yap-bot say` takes `--token`. Webhooks have their own secrets
+(`secret_env`), and `/api/ask` its `apiSecret`.
+
+## Testing an agent
+
+- `npm run say -- "…"`: typed turns against the running agent, tools run for real.
+- `npm run eval`: what people say → the tool the model calls, from `evals/cases.ts` (nothing runs).
+- `yap-bot/testing`: `TestClient`, a headless device for your own scripts (text or audio in, every
+  event out), and `speech()` for synthetic speech.
 
 ## The model
 
@@ -201,8 +224,8 @@ types). Without them only the transcript detector can wake the agent.
 
 `yap-bot init` adds `deploy/Dockerfile`: the default models get their own layer, and data lives in
 the `/data` volume. Environment: `PORT` (8450), `AGENT_DIR`, `DATA_DIR`, `MODELS_DIR`, `TLS=off`,
-`TLS_CERT`/`TLS_KEY`, `TLS_NAMES`, `WATCH=0`, `YAP_DOWNLOAD=0`, `TZ`. From code:
-`import { start } from "yap-bot/server"`.
+`TLS_CERT`/`TLS_KEY`, `TLS_NAMES`, `WATCH=0`, `YAP_DOWNLOAD=0`, `YAP_DEVICE_TOKEN`, `TZ`. From code:
+`const { port, close } = await start({ agentDir, port: 0 })` from `yap-bot/server`.
 
 ## This repo
 
@@ -211,6 +234,7 @@ npm install
 npm run dev          # the template agent (packages/yap-bot/template), from source
 npm run build        # the web client → packages/yap-bot/web, the package → packages/yap-bot/dist
 npm run typecheck
+npm test             # unit tests, and a whole server with fake speech engines and a mock LLM (no models)
 npm run speak-test   # synthetic speech in, timings and an interruption test out (YAP_URL=…)
 node --conditions=yap-bot-src scripts/wake-latency.ts "Computer, what time is it?"
 ```

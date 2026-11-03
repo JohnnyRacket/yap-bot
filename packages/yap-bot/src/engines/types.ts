@@ -143,6 +143,8 @@ export interface TtsEngine {
   readonly sampleRate?: number;
   /** Resolves with the audio length in ms. */
   synthesize(text: string, o: SynthesizeOptions): Promise<number>;
+  /** Release what it holds (a worker thread) when the server stops. */
+  close?(): void | Promise<void>;
 }
 
 export interface TtsSpec {
@@ -150,6 +152,8 @@ export interface TtsSpec {
   /** Called once at startup. */
   create(env: Omit<EngineEnv, "sampleRate">): TtsEngine;
   downloads?: ModelDownload[];
+  /** Files a voice needs, when the voice isn't among the downloads (e.g. a Kokoro voice of your choosing). */
+  downloadsFor?(voice: string): ModelDownload[];
   /** Changes when a restart is needed for new settings to apply (default: name). */
   key?: string;
 }

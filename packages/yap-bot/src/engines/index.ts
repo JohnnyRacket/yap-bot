@@ -139,6 +139,8 @@ export function sherpaKws(o: { model?: string; download?: ModelDownload | false 
 
 const KOKORO = "https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX/resolve/main";
 
+const kokoroVoice = (v: string): ModelDownload => ({ path: `kokoro/voices/${v}.bin`, url: `${KOKORO}/voices/${v}.bin` });
+
 /** Voices fetched by default; any of Kokoro's others can be listed in `voices`. */
 export const KOKORO_VOICES = ["af_heart", "af_bella", "af_nicole", "am_michael", "am_fenrir", "bf_emma", "bm_george"];
 
@@ -156,8 +158,10 @@ export function kokoro(o: { threads?: number; voices?: string[] } = {}): TtsSpec
     downloads: [
       { path: "kokoro/model.onnx", url: `${KOKORO}/onnx/model.onnx` },
       { path: "kokoro/tokenizer.json", url: `${KOKORO}/tokenizer.json` },
-      ...voices.map((v) => ({ path: `kokoro/voices/${v}.bin`, url: `${KOKORO}/voices/${v}.bin` })),
+      ...voices.map(kokoroVoice),
     ],
+    // tts.voice is fetched too, whichever of Kokoro's voices it is
+    downloadsFor: (voice) => (/^[a-z]{2}_[a-z]+$/.test(voice) ? [kokoroVoice(voice)] : []),
   };
 }
 

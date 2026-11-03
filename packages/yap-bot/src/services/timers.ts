@@ -33,6 +33,12 @@ export class TimerService implements Timers {
     return timer;
   }
 
+  /** Stops counting down (the timers stay saved, and start again with the next TimerService). */
+  stop() {
+    for (const h of this.handles.values()) clearTimeout(h);
+    this.handles.clear();
+  }
+
   list(device?: Device): Timer[] {
     const all = [...this.timers].sort((a, b) => a.endsAt - b.endsAt);
     if (!device) return all;
