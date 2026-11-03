@@ -52,7 +52,9 @@ export const WAKE_PREROLL_MS = 800;
 // --- client → server -----------------------------------------------------------------------
 
 export type ClientMessage =
-  | { type: "hello"; deviceId: string; room?: string; mode: ListenMode; interruptions?: boolean; wakeDetector?: WakeDetector }
+  | { type: "hello"; deviceId: string; room?: string; mode: ListenMode; interruptions?: boolean; wakeDetector?: WakeDetector; voice?: string }
+  /** The voice this device wants, one of the welcome's voices (unknown ones get the default). */
+  | { type: "voice"; voice: string }
   | { type: "mode"; mode: ListenMode; interruptions?: boolean; wakeDetector?: WakeDetector }
   /** wakeDetector "device": the device heard the wake word. Audio follows, starting WAKE_PREROLL_MS before it. */
   | { type: "wake"; keyword: string }
@@ -94,12 +96,17 @@ export type ServerMessage =
       /** How to show the agent: its title and an emoji, and whether to show tool calls and timings by default. */
       ui: { title: string; icon: string; details?: boolean };
       wakeWord: string;
+      /** The voices this device can pick, in the order to show them, and the one it has. */
+      voices: { id: string; label: string }[];
+      voice: string;
       /** Absent when the agent has no keywords or the server has no keyword spotter model. */
       deviceWake?: DeviceWakeConfig;
       followUpMs: number;
       serverTime: number;
       capabilities: AgentSummary;
     }
+  /** The agent was edited and its voices changed: the list to show, and this device's voice now. */
+  | { type: "voices"; voices: { id: string; label: string }[]; voice: string }
   /** awake: wake mode only. A device spotting the wake word itself streams audio while it's true. */
   | { type: "state"; state: SessionState; awake?: boolean }
   | { type: "transcript"; turnId: number; text: string; final: boolean }

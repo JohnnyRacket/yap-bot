@@ -34,7 +34,7 @@ export function voiceDownloads(reg: Registry): ModelDownload[] {
   const v = reg.voice;
   return [
     ...[v.stt, v.vad, v.turn.detector, v.wake.spotter, v.tts.engine].flatMap((e) => (e ? (e.downloads ?? []) : [])),
-    ...(v.tts.engine.downloadsFor?.(v.tts.voice) ?? []),
+    ...v.tts.voices.flatMap((c) => v.tts.engine.downloadsFor?.(c.id) ?? []),
   ];
 }
 
@@ -136,21 +136,39 @@ export class Hub {
       this.startSchedules();
       this.triggers.start();
       void this.warmAcks();
-      for (const s of this.sessions.values()) s.send({ type: "agent_reloaded", ...summarize(this.reg) });
+      for (const s of this.sessions.values()) {
+        s.send({ type: "agent_reloaded", ...summarize(this.reg) });
+        s.voice = this.voiceFor(s.voice);
+        s.send({ type: "voices", voices: this.reg.voice.tts.voices, voice: s.voice });
+      }
     } catch (e) {
       log.error(`agent reload failed, keeping the previous version: ${(e as Error).message}`);
       for (const s of this.sessions.values()) s.send({ type: "error", message: `agent reload failed: ${(e as Error).message}` });
     }
   }
 
-  /** Every ack phrase the agent can say, as ready-made audio in the current voice. */
+  /**
+   * Every ack phrase the agent can say, as ready-made audio: in the default voice first, then in the
+   * voices devices have picked (the rest are made the first time a device picks one).
+   */
   private async warmAcks() {
+    const voices = [this.reg.voice.tts.voice, ...new Set([...this.sessions.values()].map((s) => s.voice))];
+    for (const voice of new Set(voices)) await this.warmAcksFor(voice);
+  }
+
+  async warmAcksFor(voice: string) {
     const { acks, tts } = this.reg.voice;
     const toolAcks = [...acks.tool, ...this.reg.tools.flatMap(({ def }) => (def.ack === false || def.ack === undefined ? [] : [def.ack].flat()))];
     const t0 = performance.now();
-    await this.tts.warm(toolAcks, tts.voice, tts.ackSpeed ?? tts.speed);
-    await this.tts.warm(acks.cache, tts.voice, tts.speed);
-    log.info(`acks ready: ${new Set([...toolAcks, ...acks.cache]).size} phrases in ${Math.round(performance.now() - t0)} ms`);
+    await this.tts.warm(toolAcks, voice, tts.ackSpeed ?? tts.speed);
+    await this.tts.warm(acks.cache, voice, tts.speed);
+    log.info(`acks ready in ${voice}: ${new Set([...toolAcks, ...acks.cache]).size} phrases in ${Math.round(performance.now() - t0)} ms`);
+  }
+
+  /** The voice a device asked for, when the agent offers it; else the default. */
+  voiceFor(asked: string | undefined): string {
+    const { voice, voices } = this.reg.voice.tts;
+    return asked && voices.some((v) => v.id === asked) ? asked : voice;
   }
 
   attach(ws: WebSocket) {

@@ -8,6 +8,7 @@ import type { ServerMessage } from "../src/protocol.ts";
 import { TestClient } from "../src/testing/client.ts";
 import { start, type Running } from "../src/start.ts";
 import { startMockLlm, type MockLlm } from "./fixtures/mock-llm.ts";
+import { voices as ttsVoices } from "./fixtures/engines/silent-tts.ts";
 
 let llm: MockLlm;
 let server: Running;
@@ -145,6 +146,27 @@ test("talking over a long reply interrupts it", async () => {
   const d = await done;
   assert.ok(d.type === "turn_done" && d.interrupted);
   assert.ok(d.type === "turn_done" && d.spoken.length < 200, "only what was heard is kept");
+});
+
+test("a device picks its voice from the agent's", async () => {
+  const c = await device();
+  const welcome = c.events.find((e) => e.msg.type === "welcome")?.msg;
+  assert.ok(welcome?.type === "welcome");
+  // the default voice joins the list (first), the offered one follows
+  assert.deepEqual(welcome.voices.map((v) => v.id), ["test", "other"]);
+  assert.equal(welcome.voice, "test");
+  // the voices synthesized during a turn (short phrases come from the cache once made, so none at all is possible)
+  const voicesOfTurn = async (text: string) => {
+    const from = ttsVoices.length;
+    c.send({ type: "text", text });
+    await untilDone(c);
+    return new Set(ttsVoices.slice(from).map((v) => v.voice));
+  };
+  c.send({ type: "voice", voice: "other" });
+  assert.deepEqual([...(await voicesOfTurn("hello"))], ["other"]);
+  // a voice the agent doesn't offer falls back to the default
+  c.send({ type: "voice", voice: "nope" });
+  assert.ok(!(await voicesOfTurn("hello again")).has("other"));
 });
 
 test("end_conversation ends the turn without another model round", async () => {

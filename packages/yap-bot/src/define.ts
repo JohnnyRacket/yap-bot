@@ -2,7 +2,7 @@
 // recognizes; nothing runs until the runtime calls it.
 import type { z } from "zod";
 import type { EngineSpec, KwsSpec, TtsSpec } from "./engines/types.ts";
-import { kokoro, nemotron, sherpaKws, silero, smartTurn } from "./engines/index.ts";
+import { kokoro, nemotron, sherpaKws, silero, smartTurn, type VoiceChoice } from "./engines/index.ts";
 import type { ModelConfig } from "./llm/client.ts";
 import * as acks from "./acks.ts";
 
@@ -224,7 +224,13 @@ export interface VoiceDefinition {
   tts: {
     /** Default: Kokoro in process, 4 threads. */
     engine: TtsSpec;
+    /** The voice devices get unless they pick another. */
     voice: string;
+    /**
+     * Voices a device can pick in its Settings, in the order shown (e.g. kokoroVoiceChoices(), best
+     * first). The default voice is always among them. Each is downloaded at start.
+     */
+    voices: VoiceChoice[];
     speed: number;
     /** Speed for tool acks ("One sec."), which are there to fill time. Default: speed. */
     ackSpeed?: number;
@@ -268,12 +274,20 @@ export interface VoiceInput {
   vad?: EngineSpec;
   turn?: Partial<VoiceDefinition["turn"]>;
   wake?: Partial<VoiceDefinition["wake"]>;
-  tts?: Partial<VoiceDefinition["tts"]>;
+  /** voices: voice ids, or { id, label } to name them in Settings. */
+  tts?: Partial<Omit<VoiceDefinition["tts"], "voices">> & { voices?: (string | VoiceChoice)[] };
   interruptions?: Partial<VoiceDefinition["interruptions"]>;
   acks?: Partial<VoiceDefinition["acks"]>;
   phrases?: Partial<VoiceDefinition["phrases"]>;
   prefill?: boolean;
   hooks?: VoiceDefinition["hooks"];
+}
+
+/** tts.voices as choices, with the default voice among them (first, when it wasn't listed). */
+function voiceList(tts: Omit<VoiceDefinition["tts"], "voices"> & { voices?: (string | VoiceChoice)[] }): VoiceDefinition["tts"] {
+  const voices = (tts.voices ?? []).map((v) => (typeof v === "string" ? { id: v, label: v } : v));
+  if (!voices.some((v) => v.id === tts.voice)) voices.unshift({ id: tts.voice, label: tts.voice });
+  return { ...tts, voices };
 }
 
 export function defaultTimerDone(t: Timer): string {
@@ -288,7 +302,7 @@ export function defineVoice(def: VoiceInput = {}): VoiceDefinition {
     vad: def.vad ?? silero(),
     turn: { detector: smartTurn(), threshold: 0.5, pauseMs: 200, incompleteWaitMs: 1500, ...def.turn },
     wake: { spotter: sherpaKws(), ...def.wake },
-    tts: { engine: kokoro(), voice: "af_heart", speed: 1.3, ackSpeed: 1.1, ...def.tts },
+    tts: voiceList({ engine: kokoro(), voice: "af_heart", speed: 1.3, ackSpeed: 1.1, ...def.tts }),
     interruptions: { minWords: 2, pauseOnSpeech: true, ...def.interruptions },
     acks: { tool: acks.action, cache: [], ...def.acks },
     phrases: { error: "Sorry, something went wrong.", noAnswer: "Sorry, I couldn't find an answer to that.", timerDone: defaultTimerDone, ...def.phrases },

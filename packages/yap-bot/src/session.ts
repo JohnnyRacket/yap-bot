@@ -130,6 +130,8 @@ export class Session {
   /** Acks said lately, newest last, so the next one isn't a repeat. */
   private recentAcks: string[] = [];
   private turn: Turn | null = null;
+  /** This device's voice: the default, or one it picked from the agent's voices. */
+  voice: string;
   private pending: { text: string; source: string }[] = [];
   private hub: Hub;
   private ws: WebSocket;
@@ -142,6 +144,8 @@ export class Session {
     this.mode = hello.mode;
     this.interruptions = hello.interruptions ?? true;
     this.detector = hello.wakeDetector ?? "both";
+    this.voice = hub.voiceFor(hello.voice);
+    if (this.voice !== hub.reg.voice.tts.voice) void hub.warmAcksFor(this.voice);
     hub.hearing.open(sid, this.mode, this.spotting(), this.gated(), (ev) => this.onHearing(ev));
     const { agent } = hub.reg;
     this.send({
@@ -151,6 +155,8 @@ export class Session {
       agent: agent.name,
       ui: agent.ui,
       wakeWord: agent.wake.word,
+      voices: hub.reg.voice.tts.voices,
+      voice: this.voice,
       deviceWake: hub.deviceWake,
       followUpMs: agent.followUpMs,
       serverTime: Date.now(),
@@ -189,6 +195,12 @@ export class Session {
       case "wake":
         this.onDeviceWake(msg.keyword);
         break;
+      case "voice": {
+        this.voice = this.hub.voiceFor(msg.voice);
+        // its acks, ready-made like the default voice's (in the background)
+        void this.hub.warmAcksFor(this.voice);
+        break;
+      }
       case "push":
         if (msg.down && this.turn) this.interrupt();
         this.hub.hearing.push(this.sid, msg.down);
@@ -558,7 +570,8 @@ export class Session {
     const chunk: Chunk = { id: ++this.chunkSeq, text, synthesized: false, durationMs: 0, playedMs: 0, done: false };
     turn.chunks.push(chunk);
     this.send({ type: "assistant", turnId: turn.id, chunkId: chunk.id, text });
-    const { voice } = this.hub.reg.voice.tts;
+    // the agent may have been edited to drop the voice this device picked
+    const voice = this.hub.voiceFor(this.voice);
     const speed = next.speed ?? this.hub.reg.voice.tts.speed;
     let first = turn.chunks.length === 1;
     try {

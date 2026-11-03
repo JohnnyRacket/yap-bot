@@ -19,6 +19,8 @@ const settings = {
   detector: (saved.detector ?? "device") as WakeDetector,
   /** Tool calls, timings and wake word settings: for whoever builds the agent. */
   details: saved.details ?? new URLSearchParams(location.search).has("debug"),
+  /** Picked from the agent's voices; empty: the agent's default. */
+  voice: (saved.voice ?? "") as string,
 };
 /** The device hasn't chosen: the agent's default (ui.details) applies. */
 let detailsChosen = saved.details !== undefined || new URLSearchParams(location.search).has("debug");
@@ -38,6 +40,20 @@ $<HTMLInputElement>("details").addEventListener("change", () => {
   save();
 });
 const touch = matchMedia("(pointer: coarse)").matches;
+
+// --- voice --------------------------------------------------------------------------------
+
+/** The agent's voices, in its order (best first), with this device's selected; hidden when there's one. */
+function showVoices(voices: { id: string; label: string }[], current: string) {
+  const select = $<HTMLSelectElement>("voice");
+  select.replaceChildren(...voices.map((v) => new Option(v.label, v.id, false, v.id === current)));
+  $("voiceField").hidden = voices.length < 2;
+}
+$<HTMLSelectElement>("voice").addEventListener("change", () => {
+  settings.voice = $<HTMLSelectElement>("voice").value;
+  save();
+  send({ type: "voice", voice: settings.voice });
+});
 
 /** The agent's own name and emoji, from the server. */
 function brand(ui: { title: string; icon: string; details?: boolean }) {
@@ -170,7 +186,7 @@ function connect() {
   sock.onopen = () => {
     setConn("connected", "ok");
     wakePending = false;
-    send({ type: "hello", deviceId: settings.deviceId, room: settings.room, mode: settings.mode, interruptions: settings.interruptions, wakeDetector: detector() });
+    send({ type: "hello", deviceId: settings.deviceId, room: settings.room, mode: settings.mode, interruptions: settings.interruptions, wakeDetector: detector(), voice: settings.voice || undefined });
   };
   sock.onclose = (e) => {
     if (ws !== sock) return;
@@ -258,11 +274,15 @@ function onMessage(m: ServerMessage) {
     case "welcome":
       wakeWord = m.wakeWord;
       brand(m.ui);
+      showVoices(m.voices, m.voice);
       deviceWake = m.deviceWake;
       loadSpotter();
       $("agentInfo").textContent = `· ${m.agent} · ${m.room}`;
       renderAgent(m.capabilities);
       updateHint();
+      break;
+    case "voices":
+      showVoices(m.voices, m.voice);
       break;
     case "state":
       state = m.state;

@@ -144,6 +144,62 @@ const kokoroVoice = (v: string): ModelDownload => ({ path: `kokoro/voices/${v}.b
 /** Voices fetched by default; any of Kokoro's others can be listed in `voices`. */
 export const KOKORO_VOICES = ["af_heart", "af_bella", "af_nicole", "am_michael", "am_fenrir", "bf_emma", "bm_george"];
 
+/** A voice a device can pick: its id, and how Settings shows it. */
+export interface VoiceChoice {
+  id: string;
+  label: string;
+}
+
+/**
+ * Kokoro's English voices, best first, by the grades its authors give them (VOICES.md in
+ * hexgrad/Kokoro-82M: how good and how much training audio each had). Grades are a guide: voices
+ * sound better or worse to different people.
+ */
+export const KOKORO_ENGLISH_VOICES: { id: string; name: string; accent: "American" | "British"; gender: "woman" | "man"; grade: string }[] = [
+  { id: "af_heart", name: "Heart", accent: "American", gender: "woman", grade: "A" },
+  { id: "af_bella", name: "Bella", accent: "American", gender: "woman", grade: "A-" },
+  { id: "af_nicole", name: "Nicole", accent: "American", gender: "woman", grade: "B-" },
+  { id: "bf_emma", name: "Emma", accent: "British", gender: "woman", grade: "B-" },
+  { id: "am_michael", name: "Michael", accent: "American", gender: "man", grade: "C+" },
+  { id: "am_fenrir", name: "Fenrir", accent: "American", gender: "man", grade: "C+" },
+  { id: "am_puck", name: "Puck", accent: "American", gender: "man", grade: "C+" },
+  { id: "af_aoede", name: "Aoede", accent: "American", gender: "woman", grade: "C+" },
+  { id: "af_kore", name: "Kore", accent: "American", gender: "woman", grade: "C+" },
+  { id: "af_sarah", name: "Sarah", accent: "American", gender: "woman", grade: "C+" },
+  { id: "bm_george", name: "George", accent: "British", gender: "man", grade: "C" },
+  { id: "bm_fable", name: "Fable", accent: "British", gender: "man", grade: "C" },
+  { id: "af_alloy", name: "Alloy", accent: "American", gender: "woman", grade: "C" },
+  { id: "af_nova", name: "Nova", accent: "American", gender: "woman", grade: "C" },
+  { id: "bf_isabella", name: "Isabella", accent: "British", gender: "woman", grade: "C" },
+  { id: "af_sky", name: "Sky", accent: "American", gender: "woman", grade: "C-" },
+  { id: "bm_lewis", name: "Lewis", accent: "British", gender: "man", grade: "D+" },
+  { id: "am_echo", name: "Echo", accent: "American", gender: "man", grade: "D" },
+  { id: "am_eric", name: "Eric", accent: "American", gender: "man", grade: "D" },
+  { id: "am_liam", name: "Liam", accent: "American", gender: "man", grade: "D" },
+  { id: "am_onyx", name: "Onyx", accent: "American", gender: "man", grade: "D" },
+  { id: "bm_daniel", name: "Daniel", accent: "British", gender: "man", grade: "D" },
+  { id: "af_jessica", name: "Jessica", accent: "American", gender: "woman", grade: "D" },
+  { id: "af_river", name: "River", accent: "American", gender: "woman", grade: "D" },
+  { id: "bf_alice", name: "Alice", accent: "British", gender: "woman", grade: "D" },
+  { id: "bf_lily", name: "Lily", accent: "British", gender: "woman", grade: "D" },
+  { id: "am_santa", name: "Santa", accent: "American", gender: "man", grade: "D-" },
+  { id: "am_adam", name: "Adam", accent: "American", gender: "man", grade: "F+" },
+];
+
+const GRADES = ["A", "A-", "B+", "B", "B-", "C+", "C", "C-", "D+", "D", "D-", "F+", "F"];
+
+/**
+ * Kokoro's English voices for `tts.voices`, best first, as "Michael · American man · C+". With
+ * minGrade, only those graded at least that; gender narrows them further.
+ */
+export function kokoroVoiceChoices(o: { minGrade?: string; gender?: "woman" | "man" } = {}): VoiceChoice[] {
+  const floor = o.minGrade ? GRADES.indexOf(o.minGrade) : GRADES.length;
+  return KOKORO_ENGLISH_VOICES.filter((v) => GRADES.indexOf(v.grade) <= floor && (!o.gender || v.gender === o.gender)).map((v) => ({
+    id: v.id,
+    label: `${v.name} · ${v.accent} ${v.gender} · ${v.grade}`,
+  }));
+}
+
 /**
  * Kokoro 82M v1.0 in process (onnxruntime, its own thread), with kokoro-js's pronunciation: the
  * default. American (a…) and British (b…) English voices.

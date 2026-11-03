@@ -212,6 +212,17 @@ export default defineVoice({
 });
 ```
 
+**Voices a device can pick.** `tts.voices` lists voices offered in each device's Settings, in the
+order shown; a device's pick is used for everything it hears, announcements too, and the default
+voice is always on the list. `kokoroVoiceChoices({ minGrade?, gender? })` from `yap-bot/engines`
+gives Kokoro's English voices best first, by its authors' grades ("Michael · American man · C+"); or
+list your own as ids or `{ id, label }`. Each offered voice is downloaded at start, and its acks are
+made ready the first time a device picks it.
+
+```ts
+tts: { voice: "am_michael", voices: kokoroVoiceChoices({ minGrade: "C" }) },
+```
+
 ### Speech services elsewhere
 
 Speech to text and speech can each come from a service on another machine instead: a GPU box,

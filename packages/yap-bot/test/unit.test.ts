@@ -103,6 +103,21 @@ test("trimSilence keeps the speech", () => {
   assert.ok(t.length < pcm.length && t.length >= 2000);
 });
 
+test("voices: graded best first, the default always offered", async () => {
+  const { kokoroVoiceChoices } = await import("../src/engines/index.ts");
+  const all = kokoroVoiceChoices();
+  assert.equal(all[0].id, "af_heart");
+  assert.equal(all.at(-1)!.id, "am_adam");
+  const men = kokoroVoiceChoices({ gender: "man", minGrade: "C" });
+  assert.deepEqual(men.map((v) => v.id), ["am_michael", "am_fenrir", "am_puck", "bm_george", "bm_fable"]);
+  assert.equal(men[0].label, "Michael · American man · C+");
+  // the default joins the list when it isn't on it, first
+  const v = defineVoice({ tts: { voice: "bm_lewis", voices: men } });
+  assert.equal(v.tts.voices[0].id, "bm_lewis");
+  assert.equal(v.tts.voices.length, 6);
+  assert.deepEqual(defineVoice().tts.voices, [{ id: "af_heart", label: "af_heart" }]);
+});
+
 test("atStart goes with every", () => {
   assert.throws(() => defineTrigger({ on: { atStart: true, webhook: true }, announce: "x" }));
   assert.equal(defineTrigger({ on: { every: "1h", atStart: true }, announce: "x" }).on.atStart, true);

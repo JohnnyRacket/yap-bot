@@ -8,7 +8,8 @@ const PIECE = TTS_SAMPLE_RATE / 10;
 
 /** Phrases up to this long are kept once spoken ("Okay.", "Done."), besides the ones warmed up. */
 const SHORT = 24;
-const MAX_CACHED = 128;
+// about 50 KB a phrase: room for several voices' acks
+const MAX_CACHED = 512;
 
 /**
  * Keeps short phrases as ready-made audio with the silence around them trimmed, so acks and

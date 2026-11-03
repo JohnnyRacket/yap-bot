@@ -8,7 +8,7 @@ export default defineVoice({
   vad: engine("energy-vad", {}),
   turn: { detector: false, pauseMs: 200, incompleteWaitMs: 400 },
   wake: { spotter: false },
-  tts: { engine: silentTts(), voice: "test", speed: 1 },
+  tts: { engine: silentTts(), voice: "test", voices: [{ id: "other", label: "Other voice" }], speed: 1 },
   interruptions: { minWords: 2 },
   acks: { tool: ["Okay."] },
 });
