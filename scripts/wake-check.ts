@@ -30,8 +30,9 @@ async function wakes(text: string, voice: string): Promise<boolean> {
 
 const sentences = process.argv.slice(2);
 for (const text of sentences) {
-  const results = [];
-  for (const v of voices) results.push(await wakes(text, v));
-  console.log(`${results.filter(Boolean).length}/${voices.length} woke  "${text}"`);
+  const woke: string[] = [];
+  for (const v of voices) if (await wakes(text, v)) woke.push(v);
+  const others = voices.filter((v) => !woke.includes(v));
+  console.log(`${woke.length}/${voices.length} woke  "${text}"${woke.length && others.length ? `  (not ${others.join(", ")})` : ""}`);
 }
 process.exit(0);
