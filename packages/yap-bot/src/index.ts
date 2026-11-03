@@ -33,6 +33,7 @@ export {
 } from "./define.ts";
 export type { ModelConfig, CompletionRequest, CompletionResult, ChatMessage, ToolCall, ToolSpec } from "./llm/client.ts";
 export { spokenDuration } from "./services/timers.ts";
+export { spokenDigits } from "./spoken.ts";
 export { store } from "./services/store.ts";
 export { shared } from "./shared.ts";
 export * as acks from "./acks.ts";

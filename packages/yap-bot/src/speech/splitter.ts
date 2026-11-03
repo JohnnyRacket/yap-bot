@@ -1,6 +1,10 @@
 // Turns streamed LLM text into speakable pieces as soon as each is complete.
 
 const SENTENCE_END = /[.!?…]+["')\]]*(\s+|$)|\n+/g;
+// Words that end in a period without ending the sentence ("Dr. Seuss", "Mt. Everest").
+const ABBREVIATIONS = /(?:^|[\s("'])(?:mr|mrs|ms|dr|prof|st|mt|jr|sr|vs|etc|vol|ch|no|approx|e\.g|i\.e)\.$/i;
+// What a new sentence starts with.
+const SENTENCE_START = /^["'(\[]?[\p{Lu}\p{N}]/u;
 // Text to speech takes longer the longer the piece, so long sentences are split at a comma: the
 // first piece early (speech starts sooner), later ones only when long.
 const FIRST_CLAUSE_MIN = 30;
@@ -33,9 +37,9 @@ export class SentenceSplitter {
   push(delta: string) {
     this.buf += delta;
     for (;;) {
-      SENTENCE_END.lastIndex = 0;
-      const m = SENTENCE_END.exec(this.buf);
-      let cut = m ? m.index + m[0].length : -1;
+      const end = this.sentenceEnd();
+      if (end === "wait") return;
+      let cut = end;
       if (cut < 0 && this.emitted === 0 && this.buf.length >= FIRST_CLAUSE_MIN) {
         const comma = this.buf.lastIndexOf(", ");
         if (comma >= 15) cut = comma + 2;
@@ -52,6 +56,26 @@ export class SentenceSplitter {
       this.emit(this.buf.slice(0, cut));
       this.buf = this.buf.slice(cut);
     }
+  }
+
+  /**
+   * Where the first sentence ends, -1 for nowhere yet, or "wait" when that depends on text still
+   * to come. A period after an initial or an abbreviation ("T. Kingfisher", "Dr. Seuss") isn't an
+   * end, and neither is one followed by a lowercase word ("Last Chance Live! as an audiobook"), so
+   * a possible end at the very end of the text waits for the next word.
+   */
+  private sentenceEnd(): number | "wait" {
+    SENTENCE_END.lastIndex = 0;
+    for (let m; (m = SENTENCE_END.exec(this.buf)); ) {
+      const cut = m.index + m[0].length;
+      if (m[0].startsWith("\n")) return cut;
+      if (cut >= this.buf.length) return "wait";
+      const before = this.buf.slice(0, m.index + 1);
+      if (m[0][0] === "." && (/(?:^|[\s.("'])\p{Lu}\.$/u.test(before) || ABBREVIATIONS.test(before))) continue;
+      if (!SENTENCE_START.test(this.buf.slice(cut))) continue;
+      return cut;
+    }
+    return -1;
   }
 
   flush() {

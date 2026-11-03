@@ -92,7 +92,11 @@ read tool from a change tool that has an `action` (`read_list` / `change_list`).
 text body, available as `{{payload}}` / `{{payload.field}}`; with `secret_env`, send
 `Authorization: Bearer <secret>`, or `?token=`). Only POST: a link or an image can't fire one.
 A webhook without a secret that puts its payload in a prompt is warned about at load: anyone on
-the network could have the agent do things with your tools. **Every**: periodic checks, with a `store` for spotting changes.
+the network could have the agent do things with your tools. A webhook with `respond: true`
+(frontmatter, or `webhook: { respond: true }`) waits for the trigger and answers with what `run()`
+returned, or a prompt's reply instead of announcing it; others answer 202 at once. **Every**:
+periodic checks, with a `store` for spotting changes. The first run comes one interval after start
+unless `at_start: true` (`atStart`) runs it once when the server starts as well (not on reloads).
 **Events**: `timer_done` (replaces the built-in "your timer is done"), `device_connected`, `device_disconnected`.
 
 **`POST /api/ask`** `{"text": "…", "room": "kitchen"}` runs one typed turn (tools run for real) and
@@ -133,12 +137,34 @@ export async function loggedIn(signal: AbortSignal) {
 **Per-person state.** A tool's `store` is shared by every device; key by `device.id` for what's
 one person's ("where we got to in the list"). Turns from schedules, triggers and `/api/ask` run as
 device `schedule` in room `all`/`api`. `store` writes plain JSON under `data/store/`: fine for a
-cursor or a preference, not for passwords (keep those in `.env`).
+cursor or a preference, not for passwords (keep those in `.env`). A store notices when its file is
+changed by something else (a script, an edit by hand) and reads it again.
 
 **Confirm before doing something that can't be undone.** Give the tool a `confirmed` argument and
 say in its description to call it with `confirmed: false` first; return what *would* happen, so the
 model asks ("Cancel your hold on Piranesi?"), and act only when called again with `confirmed: true`
 after a yes. Add an eval case for each step.
+
+**When something needs setting up.** A tool that can't work yet (an account not connected, a login
+expired) should say so in words the model can pass on, including that it isn't done by voice ("That's
+set up in the settings, not by voice"); otherwise the model offers to "connect it" and can't. Throw
+an `Error` with that message, or return `{ error }`. The voice rules also tell the model to offer only
+what its tools can do.
+
+**Finishing after the turn.** A tool can start something that takes longer than the turn (waiting for
+the user to enter a code on their phone, a slow export) and return at once with what to say; when
+it's done, `ctx.announce(text, { room: ctx.device.room })` speaks the outcome in that room.
+
+**Reading out codes and numbers.** Speech reads "52541470" as a number. Return `spokenDigits(code)`
+("5 2 5 4, 1 4 7 0") from the tool and the model says it digit by digit.
+
+**Write descriptions about "the user".** Tool descriptions and results are read by the model while
+it talks *to* the person; "her holds" makes it say "her" to her face. "The user's holds" or "their
+holds" don't.
+
+**Misheard names.** Speech to text gets book titles, people and places wrong. Match what was said
+against the list the tool has (holds, contacts, rooms) by letter pairs, not exact words, and say
+the real name back so a wrong match is caught.
 
 **Long answers.** The voice rules ask for one to three sentences unless more is asked for, and
 `maxTokens` caps a reply. For a long list, return the first few with a count ("5 of 12") and a way

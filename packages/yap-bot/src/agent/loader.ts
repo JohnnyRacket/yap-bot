@@ -220,18 +220,20 @@ export async function loadAgent(dir: string, o: { requireModel?: boolean } = {})
   for (const f of files(trigDir, [".md", ".ts"])) {
     const name = nameOf(trigDir, f);
     if (f.endsWith(".md")) {
-      // frontmatter: webhook: true | every: 5m | event: timer_done, plus room, secret_env, announce: true
+      // frontmatter: webhook: true | every: 5m | event: timer_done, plus room, secret_env, announce: true, respond: true, at_start: true
       const { data, body } = parseFrontmatter(readFileSync(f, "utf8"));
       const secretEnv = str(data.secret_env);
       const on: TriggerDefinition["on"] = {};
       if (str(data.webhook) === "true") {
         // a named secret that isn't set locks the webhook rather than leaving it open
         if (secretEnv && !process.env[secretEnv]) log.warn(`trigger ${name}: ${secretEnv} is not set, so its webhook refuses every request`);
-        on.webhook = secretEnv ? { secret: process.env[secretEnv] ?? "" } : true;
+        const respond = str(data.respond) === "true";
+        on.webhook = secretEnv || respond ? { ...(secretEnv ? { secret: process.env[secretEnv] ?? "" } : {}), ...(respond ? { respond } : {}) } : true;
       }
       if (data.every) on.every = str(data.every);
+      if (str(data.at_start) === "true") on.atStart = true;
       if (data.event) on.event = str(data.event) as TriggerEventName;
-      if (Object.keys(on).length !== 1) throw new Error(`${f}: a markdown trigger needs exactly one of webhook: true, every or event`);
+      if (Object.keys(on).filter((k) => k !== "atStart").length !== 1) throw new Error(`${f}: a markdown trigger needs exactly one of webhook: true, every or event`);
       if (!body) throw new Error(`${f}: the body is the prompt (or the text, with announce: true)`);
       const action = str(data.announce) === "true" ? { announce: body } : { prompt: body };
       triggers.push({ name, def: { kind: "trigger", on, room: str(data.room), ...action } });
@@ -245,7 +247,8 @@ export async function loadAgent(dir: string, o: { requireModel?: boolean } = {})
   for (const { name, def } of triggers) {
     if (def.on.every) parseEvery(def.on.every, name);
     // its payload goes into a prompt that can call every tool
-    if (def.on.webhook === true && def.prompt) log.warn(`trigger ${name}: a webhook anyone on the network can call puts its payload in a prompt with your tools; give it a secret (secret_env)`);
+    const open = def.on.webhook === true || (typeof def.on.webhook === "object" && !("secret" in def.on.webhook));
+    if (open && def.prompt) log.warn(`trigger ${name}: a webhook anyone on the network can call puts its payload in a prompt with your tools; give it a secret (secret_env)`);
   }
 
   if (tools.length > 15) log.warn(`${tools.length} tools: a small model chooses worse past ~15`);

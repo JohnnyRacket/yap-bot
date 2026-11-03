@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Store } from "../define.ts";
 import { log } from "../log.ts";
@@ -30,25 +30,51 @@ export function readJson<T>(file: string, fallback: T): T {
 
 const stores = new Map<string, Store>();
 
-/** One JSON file per namespace under data/store/. */
+/** The file's modification time, 0 when there's none. */
+const mtime = (file: string) => {
+  try {
+    return statSync(file).mtimeMs;
+  } catch {
+    return 0;
+  }
+};
+
+/**
+ * One JSON file per namespace under data/store/. Kept in memory, but read again when the file
+ * changes underneath (a script, an edit by hand, a second process), so those aren't lost or
+ * overwritten.
+ */
 export function storeFor(dataDir: string, namespace: string): Store {
   const file = join(dataDir, "store", `${namespace.replace(/[^A-Za-z0-9_-]/g, "_")}.json`);
   let store = stores.get(file);
   if (!store) {
-    const data: Record<string, unknown> = readJson(file, {});
+    let data: Record<string, unknown> = readJson(file, {});
+    let seen = mtime(file);
+    const fresh = () => {
+      const now = mtime(file);
+      if (now !== seen) {
+        data = readJson(file, {});
+        seen = now;
+      }
+      return data;
+    };
+    const save = (text: string) => {
+      writeText(file, text);
+      seen = mtime(file);
+    };
     store = {
-      get: <T>(key: string) => data[key] as T | undefined,
+      get: <T>(key: string) => fresh()[key] as T | undefined,
       set: (key, value) => {
         // serialized first: a value that can't be (a cycle, a BigInt) changes nothing
-        const next = JSON.stringify({ ...data, [key]: value }, null, 2);
+        const next = JSON.stringify({ ...fresh(), [key]: value }, null, 2);
         data[key] = JSON.parse(next)[key];
-        writeText(file, next);
+        save(next);
       },
       delete: (key) => {
-        delete data[key];
-        writeJson(file, data);
+        delete fresh()[key];
+        save(JSON.stringify(data, null, 2));
       },
-      all: () => ({ ...data }),
+      all: () => ({ ...fresh() }),
     };
     stores.set(file, store);
   }

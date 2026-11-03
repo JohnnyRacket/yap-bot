@@ -31,6 +31,8 @@ export class Triggers {
   private hub: Hub;
   private intervals: NodeJS.Timeout[] = [];
   private running = new Set<string>();
+  /** Triggers that have had their run at start, so a reload doesn't run them again. */
+  private startedOnce = new Set<string>();
 
   constructor(hub: Hub) {
     this.hub = hub;
@@ -47,6 +49,11 @@ export class Triggers {
       if (!def.on.every) continue;
       const ms = parseDuration(def.on.every);
       this.intervals.push(setInterval(() => void this.fire(name, def, { source: "every" }), Math.max(1000, ms)));
+      if (def.on.atStart && !this.startedOnce.has(name)) {
+        this.startedOnce.add(name);
+        // a moment after start, once devices have had a chance to connect
+        this.intervals.push(setTimeout(() => void this.fire(name, def, { source: "every" }), 5000));
+      }
     }
   }
 
@@ -66,8 +73,8 @@ export class Triggers {
     return matching.length > 0;
   }
 
-  /** POST /hooks/<name>. Responds before the trigger finishes running. */
-  webhook(name: string, payload: unknown, query: Record<string, string>, authorization?: string): { status: number; body: unknown } {
+  /** POST /hooks/<name>. Responds at once, or with respond, once the trigger has run, with its result. */
+  async webhook(name: string, payload: unknown, query: Record<string, string>, authorization?: string): Promise<{ status: number; body: unknown }> {
     const t = this.list.find((x) => x.name === name && x.def.on.webhook);
     if (!t) return { status: 404, body: { error: `no webhook trigger named ${name}` } };
     const hook = t.def.on.webhook;
@@ -77,13 +84,19 @@ export class Triggers {
       const given = authorization?.replace(/^Bearer\s+/i, "") ?? query.token ?? "";
       if (!sameSecret(given, secret)) return { status: 401, body: { error: "bad or missing token" } };
     }
-    void this.fire(name, t.def, { source: "webhook", payload, query });
+    const input: TriggerInput = { source: "webhook", payload, query };
+    if (typeof hook === "object" && hook.respond) {
+      const r = await this.fire(name, t.def, input, true);
+      return r.error ? { status: 500, body: { ok: false, trigger: name, error: r.error } } : { status: 200, body: { ok: true, trigger: name, result: r.result ?? null } };
+    }
+    void this.fire(name, t.def, input);
     return { status: 202, body: { ok: true, trigger: name } };
   }
 
-  private async fire(name: string, def: TriggerDefinition, input: TriggerInput) {
+  /** Runs a trigger; with respond, a prompt's reply is returned instead of announced. */
+  private async fire(name: string, def: TriggerDefinition, input: TriggerInput, respond = false): Promise<{ result?: unknown; error?: string }> {
     // a periodic check that's still running isn't started again
-    if (input.source === "every" && this.running.has(name)) return;
+    if (input.source === "every" && this.running.has(name)) return {};
     this.running.add(name);
     const hub = this.hub;
     const source = `trigger:${name}`;
@@ -92,7 +105,7 @@ export class Triggers {
       // periodic checks tick quietly; what they announce is logged anyway
       (input.source === "every" ? log.debug : log.info)(`trigger ${name} (${input.source === "event" ? input.event : input.source})`);
       if (def.run) {
-        await def.run(
+        return { result: await def.run(
           {
             timezone: hub.reg.agent.timezone,
             timers: hub.timers,
@@ -103,15 +116,20 @@ export class Triggers {
             log: (...a) => log.info(`[trigger ${name}]`, ...a),
           },
           input,
-        );
+        ) };
       } else if (def.announce) {
-        hub.announce(fill(def.announce, input), { room }, source);
+        const text = fill(def.announce, input);
+        hub.announce(text, { room }, source);
+        return { result: text };
       } else if (def.prompt) {
         const reply = await hub.ask(fill(def.prompt, input), room);
-        if (reply) hub.announce(reply, { room }, source);
+        if (reply && !respond) hub.announce(reply, { room }, source);
+        return { result: reply };
       }
+      return {};
     } catch (e) {
       log.error(`trigger ${name} failed`, e);
+      return { error: (e as Error).message };
     } finally {
       this.running.delete(name);
     }

@@ -116,7 +116,7 @@ async function webhook(hub: Hub, req: IncomingMessage, res: ServerResponse) {
   } catch (e) {
     return reply(400, { error: (e as Error).message });
   }
-  const r = hub.triggers.webhook(name, payload, Object.fromEntries(url.searchParams), req.headers.authorization);
+  const r = await hub.triggers.webhook(name, payload, Object.fromEntries(url.searchParams), req.headers.authorization);
   reply(r.status, r.body);
 }
 

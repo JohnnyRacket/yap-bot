@@ -166,6 +166,16 @@ test("a webhook trigger announces on connected devices", async () => {
   assert.equal((await fetch(`${url}/hooks/nope`, { method: "POST" })).status, 404);
 });
 
+test("a webhook with respond waits and answers with the result", async () => {
+  const post = (body: unknown) => fetch(`${url}/hooks/sum`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const ok = await post({ a: 2, b: 3 });
+  assert.equal(ok.status, 200);
+  assert.deepEqual(await ok.json(), { ok: true, trigger: "sum", result: { sum: 5 } });
+  const failed = await post({ a: -1, b: 3 });
+  assert.equal(failed.status, 500);
+  assert.equal((await failed.json()).error, "no negatives");
+});
+
 test("/api/ask needs the secret and runs tools", async () => {
   const ask = (auth?: string) =>
     fetch(`${url}/api/ask`, { method: "POST", headers: auth ? { Authorization: `Bearer ${auth}` } : {}, body: JSON.stringify({ text: "set a timer" }) });

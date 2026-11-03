@@ -51,6 +51,44 @@ test("sentence splitter cuts at sentence ends", () => {
   assert.equal(out.join(" ").replace(/\s+/g, " "), "Hello there. It is 3.5 degrees today! What now");
 });
 
+test("sentence splitter keeps names and titles in one piece", () => {
+  const split = (pieces: string[]) => {
+    const out: string[] = [];
+    const s = new SentenceSplitter((p) => out.push(p));
+    for (const p of pieces) s.push(p);
+    s.flush();
+    return out;
+  };
+  // the cases that cut a sentence in two: an initial, an abbreviation, a title ending in "!"
+  assert.deepEqual(split(["Thornhedge is by T. Kingfisher, and it's short."]), ["Thornhedge is by T. Kingfisher, and it's short."]);
+  assert.deepEqual(split(["The Hobbit is by J.R.R. Tolkien. It's ", "a classic."]), ["The Hobbit is by J.R.R. Tolkien.", "It's a classic."]);
+  assert.deepEqual(split(["Ask Dr. Seuss. He knows."]), ["Ask Dr. Seuss.", "He knows."]);
+  assert.deepEqual(split(["You can borrow Last Chance Live!", " as an audiobook. Want it?"]), ["You can borrow Last Chance Live! as an audiobook.", "Want it?"]);
+  // a sentence end at the end of what's streamed so far waits for the next word, then cuts
+  const out: string[] = [];
+  const s = new SentenceSplitter((p) => out.push(p));
+  s.push("It's due Friday. ");
+  assert.equal(out.length, 0);
+  s.push("Want to renew it?");
+  assert.deepEqual(out, ["It's due Friday."]);
+});
+
+test("a store reads its file again when something else changed it", async () => {
+  const { storeFor } = await import("../src/services/store.ts");
+  const { mkdtempSync, writeFileSync, readFileSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const dir = mkdtempSync(join(tmpdir(), "yap-store-"));
+  const st = storeFor(dir, "linked");
+  st.set("a", 1);
+  // another process (a link script) writes the file; mtime resolution can be coarse, so step it
+  await new Promise((r) => setTimeout(r, 20));
+  writeFileSync(join(dir, "store", "linked.json"), JSON.stringify({ a: 1, token: "abc" }));
+  assert.equal(st.get("token"), "abc");
+  st.set("b", 2);
+  assert.deepEqual(JSON.parse(readFileSync(join(dir, "store", "linked.json"), "utf8")), { a: 1, token: "abc", b: 2 }, "a later write keeps what the other process wrote");
+});
+
 test("resampler keeps the length in proportion, across pieces", () => {
   const r = pcmResampler(16000, 24000);
   let samples = 0;
@@ -63,6 +101,17 @@ test("trimSilence keeps the speech", () => {
   pcm.fill(5000, 10000, 12000);
   const t = trimSilence(pcm);
   assert.ok(t.length < pcm.length && t.length >= 2000);
+});
+
+test("atStart goes with every", () => {
+  assert.throws(() => defineTrigger({ on: { atStart: true, webhook: true }, announce: "x" }));
+  assert.equal(defineTrigger({ on: { every: "1h", atStart: true }, announce: "x" }).on.atStart, true);
+});
+
+test("spokenDigits", async () => {
+  const { spokenDigits } = await import("../src/spoken.ts");
+  assert.equal(spokenDigits("52541470"), "5 2 5 4, 1 4 7 0");
+  assert.equal(spokenDigits(123456, 3), "1 2 3, 4 5 6");
 });
 
 test("spokenDuration", () => {

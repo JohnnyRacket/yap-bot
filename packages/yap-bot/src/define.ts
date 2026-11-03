@@ -116,6 +116,7 @@ export const DEFAULT_VOICE_RULES = `You are talking out loud: everything you wri
 - No markdown, lists, headings, emoji, code or links.
 - Say numbers, times and units the way a person says them.
 - When a tool can do it or knows it, call the tool instead of guessing.
+- Only offer to do things your tools can do. When a tool says something needs setting up, say so; don't offer to do it.
 - The transcript may have small mistakes; go with the most likely meaning.`;
 
 /** "[Monday, November 2, 2026 at 5:30 PM CST · room: kitchen]" */
@@ -390,15 +391,19 @@ export interface TriggerDefinition {
   on: {
     /**
      * POST /hooks/<name>. With a secret, callers must send "Authorization: Bearer <secret>" or
-     * ?token=<secret>; an empty secret refuses every request.
+     * ?token=<secret>; an empty secret refuses every request. With respond, the request waits for
+     * the trigger and gets back what run() returned (or, for a prompt, the reply instead of it being
+     * announced); without, it's answered at once with 202.
      */
-    webhook?: boolean | { secret?: string };
+    webhook?: boolean | { secret?: string; respond?: boolean };
     /** Run periodically: "30s", "5m", "1h". */
     every?: string;
+    /** With every: also run once when the server starts (not again on reloads), instead of first after one interval. */
+    atStart?: boolean;
     event?: TriggerEventName;
   };
-  /** Code to run. */
-  run?(ctx: TriggerContext, input: TriggerInput): void | Promise<void>;
+  /** Code to run. What it returns is the response of a webhook with respond. */
+  run?(ctx: TriggerContext, input: TriggerInput): unknown | Promise<unknown>;
   /**
    * Or: a prompt for the agent; the reply is announced. {{payload}} (JSON) and {{payload.field}}
    * are filled in from a webhook, {{timer.name}} / {{device.room}} from events.
@@ -413,6 +418,7 @@ export interface TriggerDefinition {
 export function defineTrigger(def: Omit<TriggerDefinition, "kind">): TriggerDefinition {
   const actions = [def.run, def.prompt, def.announce].filter((a) => a !== undefined).length;
   if (actions !== 1) throw new Error("defineTrigger needs exactly one of run, prompt or announce");
+  if (def.on.atStart && !def.on.every) throw new Error("defineTrigger's atStart goes with every");
   const kinds = [def.on.webhook, def.on.every, def.on.event].filter((k) => k !== undefined && k !== false).length;
   if (kinds !== 1) throw new Error("defineTrigger's on needs exactly one of webhook, every or event");
   return { kind: "trigger", ...def };
