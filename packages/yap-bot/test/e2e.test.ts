@@ -149,10 +149,12 @@ test("talking over a long reply interrupts it", async () => {
 
 test("end_conversation ends the turn without another model round", async () => {
   const c = await device();
-  const before = llm.requests.length;
+  // only this turn's requests: an earlier test's device can still be finishing a turn of its own
+  // (a second round would carry "okay bye" too, followed by the tool result)
+  const mine = () => llm.requests.filter((r) => r.messages.some((m) => m.role === "user" && JSON.stringify(m.content ?? "").includes("okay bye"))).length;
   c.send({ type: "text", text: "okay bye" });
   const msgs = await untilDone(c);
-  assert.equal(llm.requests.length, before + 1);
+  assert.equal(mine(), 1);
   assert.deepEqual(said(msgs), []);
 });
 
