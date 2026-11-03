@@ -41,8 +41,13 @@ export interface Running {
   close(): Promise<void>;
 }
 
+/** "~/x" → the home directory's x (a shell would, but a .env file doesn't). */
+export function expandHome(p: string): string {
+  return p === "~" || p.startsWith("~/") ? join(homedir(), p.slice(1)) : p;
+}
+
 export function defaultModelsDir(): string {
-  if (process.env.MODELS_DIR) return resolve(process.env.MODELS_DIR);
+  if (process.env.MODELS_DIR) return resolve(expandHome(process.env.MODELS_DIR));
   if (existsSync("models")) return resolve("models");
   return join(process.env.XDG_CACHE_HOME || join(homedir(), ".cache"), "yap-bot", "models");
 }
@@ -52,11 +57,11 @@ export const BUILTIN_WEB_DIR = fileURLToPath(new URL("../web/", import.meta.url)
 
 export async function start(o: StartOptions = {}): Promise<Running> {
   const env = process.env;
-  const dataDir = resolve(o.dataDir ?? env.DATA_DIR ?? "data");
+  const dataDir = resolve(expandHome(o.dataDir ?? env.DATA_DIR ?? "data"));
   const hub = await Hub.create({
-    agentDir: resolve(o.agentDir ?? env.AGENT_DIR ?? "agent"),
+    agentDir: resolve(expandHome(o.agentDir ?? env.AGENT_DIR ?? "agent")),
     dataDir,
-    modelsDir: o.modelsDir ? resolve(o.modelsDir) : defaultModelsDir(),
+    modelsDir: o.modelsDir ? resolve(expandHome(o.modelsDir)) : defaultModelsDir(),
     watch: o.watch ?? env.WATCH !== "0",
     download: o.download ?? env.YAP_DOWNLOAD !== "0",
   });
@@ -69,6 +74,13 @@ export async function start(o: StartOptions = {}): Promise<Running> {
     tlsNames: o.tlsNames ?? (env.TLS_NAMES ? env.TLS_NAMES.split(",").map((s) => s.trim()) : defaultTlsNames()),
   });
   if (o.handleSignals !== false) {
+    // a supervisor (Docker, systemd) brings back a server that can't hear any more
+    hub.onFatal = () => {
+      log.error("exiting so it can be restarted");
+      process.exit(1);
+    };
+    // logged, not fatal: one stray promise mustn't take down every device's conversation
+    process.on("unhandledRejection", (e) => log.error("unhandled rejection:", e));
     for (const sig of ["SIGINT", "SIGTERM"] as const) {
       process.on(sig, () => {
         log.info(`${sig}: bye`);

@@ -1,20 +1,29 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Store } from "../define.ts";
+import { log } from "../log.ts";
 
 /** Writes JSON atomically (temp file + rename). */
 export function writeJson(file: string, value: unknown) {
+  writeText(file, JSON.stringify(value, null, 2));
+}
+
+function writeText(file: string, text: string) {
   mkdirSync(dirname(file), { recursive: true });
-  const tmp = `${file}.tmp`;
-  writeFileSync(tmp, JSON.stringify(value, null, 2));
+  const tmp = `${file}.${process.pid}.tmp`;
+  writeFileSync(tmp, text);
   renameSync(tmp, file);
 }
 
+/** The file's JSON, or fallback when there's none. A file that can't be read is set aside (never overwritten) and logged. */
 export function readJson<T>(file: string, fallback: T): T {
   if (!existsSync(file)) return fallback;
   try {
     return JSON.parse(readFileSync(file, "utf8")) as T;
-  } catch {
+  } catch (e) {
+    const aside = `${file}.corrupt-${Date.now()}`;
+    renameSync(file, aside);
+    log.error(`${file} couldn't be read (${(e as Error).message}); moved it to ${aside} and started empty`);
     return fallback;
   }
 }
@@ -30,8 +39,10 @@ export function storeFor(dataDir: string, namespace: string): Store {
     store = {
       get: <T>(key: string) => data[key] as T | undefined,
       set: (key, value) => {
-        data[key] = value;
-        writeJson(file, data);
+        // serialized first: a value that can't be (a cycle, a BigInt) changes nothing
+        const next = JSON.stringify({ ...data, [key]: value }, null, 2);
+        data[key] = JSON.parse(next)[key];
+        writeText(file, next);
       },
       delete: (key) => {
         delete data[key];

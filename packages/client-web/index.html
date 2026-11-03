@@ -55,7 +55,7 @@
 
       <div id="backdrop" class="backdrop"></div>
       <aside class="side" id="side">
-        <div class="card">
+        <div class="card details-only">
           <h3>Last turn</h3>
           <div id="timeline" class="timeline"><p class="muted">Timings show up after a turn.</p></div>
           <div id="llmStats" class="stats"></div>
@@ -66,6 +66,7 @@
           <label class="field">Room <input id="room" /></label>
           <label class="check"><input type="checkbox" id="interruptions" /> Talking over it interrupts</label>
           <label class="check"><input type="checkbox" id="echo" /> Echo cancellation <span class="muted">(off only with headphones)</span></label>
+          <label class="check"><input type="checkbox" id="details" /> Show details <span class="muted">(tool calls, timings, wake word settings)</span></label>
           <div class="row gap">
             <button id="apply" class="btn">Reconnect</button>
             <button id="reset" class="btn">Forget conversation</button>
@@ -77,6 +78,9 @@
         </div>
       </aside>
     </main>
+    <div id="start" class="start" hidden>
+      <button id="startBtn" class="startBtn"><span class="logo big">🗣️</span><span>Tap to start</span></button>
+    </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

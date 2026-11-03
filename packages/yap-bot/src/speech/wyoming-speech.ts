@@ -29,9 +29,13 @@ export class WyomingSpeech implements TtsEngine {
 
   async synthesize(text: string, so: SynthesizeOptions): Promise<number> {
     const client = new WyomingClient(this.o.host, this.o.port);
+    let timedOut = false;
     const stop = () => client.close();
     so.signal?.addEventListener("abort", stop, { once: true });
-    const timer = setTimeout(stop, this.o.timeoutMs);
+    const timer = setTimeout(() => {
+      timedOut = true;
+      stop();
+    }, this.o.timeoutMs);
     try {
       const voice: Record<string, string> = { name: this.o.voice ?? so.voice };
       if (this.o.speaker) voice.speaker = this.o.speaker;
@@ -42,7 +46,7 @@ export class WyomingSpeech implements TtsEngine {
       for (;;) {
         const e = await client.next();
         so.signal?.throwIfAborted();
-        if (!e) throw client.error ?? new Error(`${this.name}: closed before the audio ended`);
+        if (!e) throw timedOut ? new Error(`${this.name}: no end of audio after ${this.o.timeoutMs / 1000} s`) : (client.error ?? new Error(`${this.name}: closed before the audio ended`));
         if (e.type === "error") throw new Error(`${this.name}: ${e.data.text ?? "error"}`);
         if (e.type === "audio-start") {
           if (e.data.width !== 2) throw new Error(`${this.name}: ${e.data.width * 8}-bit audio isn't supported`);

@@ -30,6 +30,11 @@ export class KokoroLocal implements TtsEngine {
         log.error("kokoro worker crashed", e);
         reject(e);
       });
+      // whatever was waiting on it fails now rather than hanging the turn
+      this.worker.on("exit", (code) => {
+        for (const settle of this.pending.values()) settle({ error: `the kokoro worker exited (${code})` });
+        this.pending.clear();
+      });
     });
   }
 
@@ -39,11 +44,15 @@ export class KokoroLocal implements TtsEngine {
 
   async synthesize(text: string, o: SynthesizeOptions): Promise<number> {
     const id = ++this.seq;
+    let timer: NodeJS.Timeout | undefined;
     const r = await new Promise<{ audio?: Float32Array; error?: string }>((resolve) => {
-      this.pending.set(id, (m) => {
+      const settle = (m: { audio?: Float32Array; error?: string }) => {
+        clearTimeout(timer);
         this.pending.delete(id);
         resolve(m);
-      });
+      };
+      this.pending.set(id, settle);
+      timer = setTimeout(() => settle({ error: "no audio after 30 s" }), 30_000);
       this.worker.postMessage({ id, text, voice: o.voice, speed: o.speed });
     });
     // the model can't be stopped mid-sentence; an interrupted turn just drops the result

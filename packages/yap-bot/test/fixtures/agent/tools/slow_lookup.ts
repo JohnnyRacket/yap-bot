@@ -6,7 +6,7 @@ export const seen = { aborted: false };
 export default defineTool({
   description: "A lookup that takes too long.",
   input: z.object({}),
-  timeoutMs: 300,
+  timeoutMs: Number(process.env.TEST_SLOW_TIMEOUT_MS ?? 300),
   ack: false,
   execute: (_, { signal }) =>
     new Promise((resolve) => {

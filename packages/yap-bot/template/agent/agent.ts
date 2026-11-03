@@ -8,6 +8,7 @@ export default defineAgent({
     id: process.env.LLM_MODEL ?? "",
     // lower is more reliable at calling tools instead of just saying it did
     temperature: 0.5,
+    // the longest reply, in tokens: raise it for an agent that reads out long lists
     maxTokens: 400,
     // for llama.cpp thinking models: a voice can't wait for it to think
     thinking: false,

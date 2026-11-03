@@ -18,7 +18,7 @@ const CHUNK = 1600;
 
 const create: SttFactory<WyomingSttOptions> = (o, env) => ({
   createStream(): SttStream {
-    const client = new WyomingClient(o.host, o.port);
+    const client = new WyomingClient(o.host, o.port, Math.min(o.timeoutMs, 5000));
     const format = { rate: env.sampleRate, width: 2, channels: 1 };
     client.send("transcribe", o.language ? { language: o.language } : {});
     client.send("audio-start", format);

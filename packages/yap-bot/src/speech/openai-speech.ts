@@ -12,6 +12,8 @@ export interface OpenAiSpeechOptions {
   sampleRate: number;
   /** Merged into the request body. */
   extraBody?: Record<string, unknown>;
+  /** Give up after this long without audio (default 30 s). */
+  timeoutMs?: number;
 }
 
 export class OpenAiSpeech implements TtsEngine {
@@ -28,18 +30,38 @@ export class OpenAiSpeech implements TtsEngine {
 
   /** Streams the speech; resolves with its length in ms. */
   async synthesize(text: string, o: SynthesizeOptions): Promise<number> {
+    // a server that stops sending mustn't hold the turn: the timer restarts with every piece
+    const stalled = new AbortController();
+    const ms = this.o.timeoutMs ?? 30_000;
+    let timer = setTimeout(() => stalled.abort(new Error(`no audio for ${ms / 1000} s`)), ms);
+    const alive = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => stalled.abort(new Error(`no audio for ${ms / 1000} s`)), ms);
+    };
+    try {
+      return await this.stream(text, o, o.signal ? AbortSignal.any([o.signal, stalled.signal]) : stalled.signal, alive);
+    } catch (e) {
+      if (stalled.signal.aborted && !o.signal?.aborted) throw new Error(`${this.name}: ${(stalled.signal.reason as Error).message}`);
+      throw e;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  private async stream(text: string, o: SynthesizeOptions, signal: AbortSignal, alive: () => void): Promise<number> {
     const headers: Record<string, string> = { "Content-Type": "application/json" };
     if (this.o.apiKey) headers.Authorization = `Bearer ${this.o.apiKey}`;
     const res = await fetch(`${this.o.baseUrl.replace(/\/$/, "")}/audio/speech`, {
       method: "POST",
       headers,
       body: JSON.stringify({ model: this.o.model, input: text, voice: o.voice, speed: o.speed, response_format: "pcm", stream: true, ...this.o.extraBody }),
-      signal: o.signal,
+      signal,
     });
     if (!res.ok || !res.body) throw new Error(`TTS ${res.status}: ${(await res.text()).slice(0, 200)}`);
     let bytes = 0;
     let carry: number | null = null;
     for await (const part of res.body as unknown as AsyncIterable<Uint8Array>) {
+      alive();
       let chunk = part;
       if (carry !== null) {
         const joined = new Uint8Array(chunk.length + 1);

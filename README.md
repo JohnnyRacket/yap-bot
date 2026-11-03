@@ -39,12 +39,13 @@ npm run eval                      # does the model call the right tools? (evals/
 
 ## The agent folder
 
-Editing a file reloads the agent live (helpers in `agent/lib/` included). Engine and wake keyword
-settings need a restart; the server says so.
+Editing a file reloads the agent live (helpers in `agent/lib/` included); a file that doesn't load
+is reported with its name and line, and the previous version keeps running. Engine and wake
+keyword settings, and `.env`, need a restart; the server says so for the first two.
 
 | Path | What |
 |---|---|
-| `agent/agent.ts` | `defineAgent({ name, model, wake, followUpMs, timezone, historyMessages, prompt, ui, apiSecret })` |
+| `agent/agent.ts` | `defineAgent({ name, model, wake, followUpMs, timezone, historyMessages, historyChars, maxToolRounds, prompt, ui, apiSecret, deviceToken })` |
 | `agent/instructions.md` | The always-on prompt (or `instructions/*.md`) |
 | `agent/voice.ts` | `defineVoice({ stt, vad, turn, wake, tts, interruptions, acks, phrases, hooks })`, optional |
 | `agent/tools/<name>.ts` | `defineTool({ description, input: z.object(…), execute(input, ctx), ack?, final? })`. `final` ends the turn after the tool runs |
@@ -89,7 +90,9 @@ read tool from a change tool that has an `action` (`read_list` / `change_list`).
 
 **Triggers** make the agent act outside a conversation. **Webhooks**: `POST /hooks/<name>` (JSON or
 text body, available as `{{payload}}` / `{{payload.field}}`; with `secret_env`, send
-`Authorization: Bearer <secret>`). **Every**: periodic checks, with a `store` for spotting changes.
+`Authorization: Bearer <secret>`, or `?token=`). Only POST: a link or an image can't fire one.
+A webhook without a secret that puts its payload in a prompt is warned about at load: anyone on
+the network could have the agent do things with your tools. **Every**: periodic checks, with a `store` for spotting changes.
 **Events**: `timer_done` (replaces the built-in "your timer is done"), `device_connected`, `device_disconnected`.
 
 **`POST /api/ask`** `{"text": "…", "room": "kitchen"}` runs one typed turn (tools run for real) and
@@ -109,12 +112,47 @@ present it. The web page asks for it once and remembers it, or open it once as
 `https://host:8450/#token=…`; `yap-bot say` takes `--token`. Webhooks have their own secrets
 (`secret_env`), and `/api/ask` its `apiSecret`.
 
+## Patterns
+
+**A login that survives edits.** Editing a file re-imports the agent folder, so a module's own
+variables start over. `shared(name, init)` makes a value once per server: a logged-in session, a
+cookie jar, a client.
+
+```ts
+// agent/lib/library.ts
+import { shared } from "yap-bot";
+export const session = shared("library", () => ({ cookie: "", until: 0 }));
+
+export async function loggedIn(signal: AbortSignal) {
+  if (Date.now() < session.until) return session.cookie;
+  // log in with process.env.LIBRARY_CARD / LIBRARY_PIN (from .env), keep the cookie for an hour
+  …
+}
+```
+
+**Per-person state.** A tool's `store` is shared by every device; key by `device.id` for what's
+one person's ("where we got to in the list"). Turns from schedules, triggers and `/api/ask` run as
+device `schedule` in room `all`/`api`. `store` writes plain JSON under `data/store/`: fine for a
+cursor or a preference, not for passwords (keep those in `.env`).
+
+**Confirm before doing something that can't be undone.** Give the tool a `confirmed` argument and
+say in its description to call it with `confirmed: false` first; return what *would* happen, so the
+model asks ("Cancel your hold on Piranesi?"), and act only when called again with `confirmed: true`
+after a yes. Add an eval case for each step.
+
+**Long answers.** The voice rules ask for one to three sentences unless more is asked for, and
+`maxTokens` caps a reply. For a long list, return the first few with a count ("5 of 12") and a way
+to get the next ones, and say in the instructions to read a few, then offer more. Tool results
+over 2000 characters are cut short in the history (the turn itself sees them whole), and the
+history is trimmed by size (`historyChars`) as well as count.
+
 ## Testing an agent
 
 - `npm run say -- "…"`: typed turns against the running agent, tools run for real.
 - `npm run eval`: what people say → the tool the model calls, from `evals/cases.ts` (nothing runs).
 - `yap-bot/testing`: `TestClient`, a headless device for your own scripts (text or audio in, every
   event out), and `speech()` for synthetic speech.
+- `yap-bot eval` exits non-zero when a case fails, for CI.
 
 ## The model
 
@@ -204,7 +242,8 @@ It may produce any sample rate (`sampleRate`) and is resampled to the devices' 2
    make a first sound in ~0.6–1 s.
 4. Text is cut into sentences. Each is spoken by the **TTS engine** and streamed to the device.
 5. The device reports playback. **Talking over it** (`interruptions.minWords`) cancels everything
-   in flight. The history keeps only what was actually heard, plus every tool result.
+   in flight, and tool calls not yet made aren't. The history keeps only what was actually heard,
+   plus every tool result (a call cut off gets a result saying so).
 
 Modes, per device: **push** to talk, **open** mic, **wake** word (then a follow-up window,
 `followUpMs`, cut short when the model calls `end_conversation`).
@@ -223,16 +262,29 @@ types). Without them only the transcript detector can wake the agent.
 ## Deploying
 
 `yap-bot init` adds `deploy/Dockerfile`: the default models get their own layer, and data lives in
-the `/data` volume. Environment: `PORT` (8450), `AGENT_DIR`, `DATA_DIR`, `MODELS_DIR`, `TLS=off`,
-`TLS_CERT`/`TLS_KEY`, `TLS_NAMES`, `WATCH=0`, `YAP_DOWNLOAD=0`, `YAP_DEVICE_TOKEN`, `TZ`. From code:
-`const { port, close } = await start({ agentDir, port: 0 })` from `yap-bot/server`.
+the `/data` volume. `.env` isn't copied into the image: give the container its settings and secrets
+(`docker run --env-file .env`, or `env_file:` in compose). Environment: `LLM_URL`, `LLM_MODEL`,
+`LLM_API_KEY`, `PORT` (8450), `AGENT_DIR`, `DATA_DIR`, `MODELS_DIR`, `WEB_DIR`, `TLS=off`,
+`TLS_CERT`/`TLS_KEY`, `TLS_NAMES` (the names devices use to reach it: the self-signed certificate
+is made for them, and inside a container it otherwise names the container), `WATCH=0`,
+`YAP_DOWNLOAD=0`, `YAP_DEVICE_TOKEN`, `YAP_API_SECRET`, `TZ`. Under `yap-bot start` the process
+exits if hearing stops working, so a restart policy brings it back.
+
+Phones: browsers only allow the microphone over HTTPS. Android Chrome accepts the self-signed
+certificate after the warning; iOS Safari has been unreliable with self-signed certificates for
+WebSockets, so test early, and if it fails give it a real certificate (`TLS_CERT`/`TLS_KEY` from
+mkcert, or put it behind a reverse proxy such as Caddy). The page asks for a tap before it can make
+sound (browsers require it), keeps the screen on while listening, and hides tool calls and timings
+unless Settings → Show details is on (or the page is opened with `?debug`).
+
+From code: `const { port, close } = await start({ agentDir, port: 0 })` from `yap-bot/server`.
 
 ## This repo
 
 ```sh
 npm install
+npm run build        # the web client → packages/yap-bot/web (the page dev serves), the package → dist
 npm run dev          # the template agent (packages/yap-bot/template), from source
-npm run build        # the web client → packages/yap-bot/web, the package → packages/yap-bot/dist
 npm run typecheck
 npm test             # unit tests, and a whole server with fake speech engines and a mock LLM (no models)
 npm run speak-test   # synthetic speech in, timings and an interruption test out (YAP_URL=…)

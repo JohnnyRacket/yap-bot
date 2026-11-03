@@ -3,13 +3,16 @@ import type { ListenMode } from "../protocol.ts";
 import type { FromHearing, HearingConfig, ToHearing } from "./messages.ts";
 import { log } from "../log.ts";
 
-export type HearingEvent = Exclude<FromHearing, { type: "ready" } | { type: "error" }>;
+export type HearingEvent = Exclude<FromHearing, { type: "ready" } | { type: "error" } | { type: "fatal" }>;
 
 /** Main-thread handle on the hearing worker. */
 export class Hearing {
   private worker: Worker;
   private listeners = new Map<string, (ev: HearingEvent) => void>();
+  private stopping = false;
   readonly ready: Promise<void>;
+  /** Called when the worker dies after starting: every device has stopped being heard. */
+  onCrash?: (e: Error) => void;
 
   constructor(config: HearingConfig) {
     this.worker = new Worker(new URL(`./worker${import.meta.url.endsWith(".ts") ? ".ts" : ".js"}`, import.meta.url));
@@ -20,13 +23,26 @@ export class Hearing {
           resolve();
         } else if (msg.type === "error") {
           log.error(`hearing: ${msg.message}`);
+        } else if (msg.type === "fatal") {
+          reject(new Error(`hearing couldn't start: ${msg.message}`));
         } else {
-          this.listeners.get(msg.sid)?.(msg);
+          // a session's trouble stays its own: the next device's events still get through
+          try {
+            this.listeners.get(msg.sid)?.(msg);
+          } catch (e) {
+            log.error(`[${msg.sid}] handling ${msg.type} failed`, e);
+          }
         }
       });
       this.worker.on("error", (e) => {
         log.error("hearing worker crashed", e);
         reject(e);
+      });
+      this.worker.on("exit", (code) => {
+        if (this.stopping) return;
+        const e = new Error(`hearing worker exited (${code})`);
+        reject(e);
+        this.onCrash?.(e);
       });
     });
     this.post({ type: "init", config });
@@ -62,6 +78,7 @@ export class Hearing {
 
   /** Stops the worker (and the turn detector's, inside it). */
   terminate() {
+    this.stopping = true;
     return this.worker.terminate();
   }
 

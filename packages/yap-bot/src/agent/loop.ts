@@ -4,6 +4,7 @@ import type { Store, ToolContext } from "../define.ts";
 import { chat, LlmQueue, Priority, type ChatMessage, type ToolCall } from "../llm/client.ts";
 import type { Registry } from "./loader.ts";
 import { LOAD_SKILL, systemPrompt, toolSpecs } from "./prompt.ts";
+import { errorMessage } from "../errors.ts";
 
 const TOOL_TIMEOUT_MS = 20_000;
 
@@ -82,7 +83,10 @@ export async function runLoop(opts: {
     messages.push(assistant);
     events.onMessage?.(assistant);
     for (const call of res.toolCalls) {
+      // interrupted: the calls still to come don't run (the turn records them as interrupted)
+      ctx.signal.throwIfAborted();
       const content = await runTool(reg, call, ctx, storeFor, events);
+      ctx.signal.throwIfAborted();
       const toolMsg: ChatMessage = { role: "tool", tool_call_id: call.id, content };
       messages.push(toolMsg);
       events.onMessage?.(toolMsg);
@@ -123,12 +127,20 @@ async function runTool(
   if (!parsed.success) return done({ error: `invalid input: ${parsed.error.message}` });
 
   let timeout: NodeJS.Timeout | undefined;
+  let onAbort: (() => void) | undefined;
   // the tool's own signal: the turn's, plus its timeout, so a fetch inside it stops too
   const timedOut = new AbortController();
   const signal = AbortSignal.any([ctx.signal, timedOut.signal]);
   try {
     const output = await Promise.race([
-      Promise.resolve(tool.execute(parsed.data, { ...ctx, signal, store: storeFor(name) })),
+      // a tool that throws synchronously rejects here too
+      new Promise((resolve) => resolve(tool.execute(parsed.data, { ...ctx, signal, store: storeFor(name) }))),
+      // interrupted: stop waiting for the tool (it's told through its signal)
+      new Promise((_, reject) => {
+        onAbort = () => reject(new Error("interrupted"));
+        if (ctx.signal.aborted) onAbort();
+        else ctx.signal.addEventListener("abort", onAbort, { once: true });
+      }),
       new Promise((_, reject) =>
         (timeout = setTimeout(() => {
           // the timeout first: a tool that answers as soon as it's aborted mustn't count as done
@@ -139,8 +151,9 @@ async function runTool(
     ]);
     return done({ output });
   } catch (e) {
-    return done({ error: (e as Error).message });
+    return done({ error: errorMessage(e) });
   } finally {
     clearTimeout(timeout);
+    if (onAbort) ctx.signal.removeEventListener("abort", onAbort);
   }
 }

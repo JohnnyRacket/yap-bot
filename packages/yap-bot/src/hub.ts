@@ -54,6 +54,8 @@ export class Hub {
   deviceWake?: DeviceWakeConfig;
   private crons: Cron[] = [];
   private stopWatching?: () => void;
+  /** Hearing died after starting: nothing will be heard again. start() exits so a supervisor restarts it. */
+  onFatal?: (e: Error) => void;
   private opts: HubOptions;
 
   private constructor(opts: HubOptions) {
@@ -74,6 +76,11 @@ export class Hub {
         : undefined;
     const { detector, ...turn } = voice.turn;
     hub.hearing = new Hearing({ modelsDir: opts.modelsDir, stt: voice.stt, vad: voice.vad, turnDetector: detector || null, ...turn, kws });
+    hub.hearing.onCrash = (e) => {
+      log.error(`${e.message}: no device can be heard until a restart`);
+      for (const s of hub.sessions.values()) s.send({ type: "error", message: "hearing stopped working; the server needs a restart" });
+      hub.onFatal?.(e);
+    };
     // same keywords and settings as the server's spotter (both apply after a restart)
     hub.kwsModel = kws?.deviceModel ? findDeviceKwsModel(opts.modelsDir, kws.deviceModel) : null;
     if (kws && hub.kwsModel) {
@@ -153,7 +160,12 @@ export class Hub {
         if (isBinary) return session?.onBinary(data);
         const msg = JSON.parse(data.toString()) as ClientMessage;
         if (msg.type === "hello") {
-          session?.close();
+          if (session) {
+            session.close();
+            this.sessions.delete(session.sid);
+          }
+          // two tabs (or a stale one) with one device id share a history; worth knowing
+          if ([...this.sessions.values()].some((s) => s.device.id === msg.deviceId)) log.warn(`device ${msg.deviceId} is connected twice: both share one conversation`);
           session = new Session(this, ws, randomUUID(), msg);
           this.sessions.set(session.sid, session);
           log.info(`device ${msg.deviceId} (${session.device.room}) connected, mode ${msg.mode}`);

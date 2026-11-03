@@ -17,6 +17,8 @@ const settings = {
   interruptions: saved.interruptions ?? true,
   echo: saved.echo ?? true,
   detector: (saved.detector ?? "device") as WakeDetector,
+  /** Tool calls, timings and wake word settings: for whoever builds the agent. */
+  details: saved.details ?? new URLSearchParams(location.search).has("debug"),
 };
 const save = () => localStorage.setItem("yap-bot", JSON.stringify(settings));
 $<HTMLInputElement>("deviceId").value = settings.deviceId;
@@ -24,6 +26,14 @@ $<HTMLInputElement>("room").value = settings.room;
 $<HTMLInputElement>("interruptions").checked = settings.interruptions;
 $<HTMLInputElement>("echo").checked = settings.echo;
 $<HTMLSelectElement>("detector").value = settings.detector;
+$<HTMLInputElement>("details").checked = settings.details;
+document.body.classList.toggle("details", settings.details);
+$<HTMLInputElement>("details").addEventListener("change", () => {
+  settings.details = $<HTMLInputElement>("details").checked;
+  document.body.classList.toggle("details", settings.details);
+  save();
+});
+const touch = matchMedia("(pointer: coarse)").matches;
 
 /** The agent's own name and emoji, from the server. */
 function brand(ui: { title: string; icon: string }) {
@@ -38,6 +48,37 @@ function brand(ui: { title: string; icon: string }) {
 // --- connection -------------------------------------------------------------------------------
 
 const audio = new Audio();
+
+// --- sound needs a tap ------------------------------------------------------------------------
+// Browsers only let a page make sound after a tap. Speech that comes before (an announcement after a
+// reload) waits, and this asks for the tap.
+
+function askForTap() {
+  if (!audio.ready) $("start").hidden = false;
+}
+audio.onNeedsTap = askForTap;
+$("startBtn").addEventListener("click", () => {
+  $("start").hidden = true;
+  void audio.unlock();
+});
+
+// --- the screen stays on while listening (a sleeping phone stops the mic) --------------------------
+
+let wakeLock: { release(): Promise<void> } | null = null;
+async function keepScreenOn(on: boolean) {
+  const nav = navigator as Navigator & { wakeLock?: { request(type: "screen"): Promise<{ release(): Promise<void> }> } };
+  if (on && !wakeLock && nav.wakeLock && document.visibilityState === "visible") wakeLock = await nav.wakeLock.request("screen").catch(() => null);
+  if (!on && wakeLock) {
+    void wakeLock.release();
+    wakeLock = null;
+  }
+}
+// the lock goes when the page is hidden; take it again on coming back
+document.addEventListener("visibilitychange", () => {
+  wakeLock = null;
+  if (document.visibilityState === "visible") void keepScreenOn(audio.micOn);
+});
+
 let ws: WebSocket | null = null;
 let wakeWord = "computer";
 let state: SessionState = "idle";
@@ -349,9 +390,9 @@ function showTimeline(marks: TimelineMark[], llm?: LlmStats) {
 function updateHint() {
   const mic = audio.micOn;
   const hints: Record<ListenMode, string> = {
-    push: "Hold the mic button (or the space bar) while you talk.",
-    open: mic ? "Listening all the time: just talk." : "Click the mic to start listening.",
-    wake: mic ? (awake ? "Awake: go ahead (follow-ups need no wake word for a few seconds)." : `Say “${wakeWord}” to wake it.`) : "Click the mic to start listening for the wake word.",
+    push: touch ? "Hold the mic button while you talk." : "Hold the mic button (or the space bar) while you talk.",
+    open: mic ? "Listening all the time: just talk." : `${touch ? "Tap" : "Click"} the mic to start listening.`,
+    wake: mic ? (awake ? "Awake: go ahead (follow-ups need no wake word for a few seconds)." : `Say “${wakeWord}” to wake it.`) : `${touch ? "Tap" : "Click"} the mic to start listening for the wake word.`,
   };
   let where = "";
   if (spottingHere()) {
@@ -360,7 +401,8 @@ function updateHint() {
     else if (deviceWake) where = " The server listens until this device's spotter has loaded…";
     else where = " The server listens (it offers no spotter for devices).";
   }
-  $("hint").textContent = hints[settings.mode] + (settings.mode === "wake" && !awake ? where : "");
+  $("hint").textContent = hints[settings.mode] + (settings.mode === "wake" && !awake && settings.details ? where : "");
+  void keepScreenOn(mic);
   $("mic").classList.toggle("on", mic && (settings.mode !== "push" || pushing));
   $("mic").classList.toggle("armed", mic && settings.mode === "push" && !pushing);
 }

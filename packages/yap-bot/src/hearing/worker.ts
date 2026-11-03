@@ -20,6 +20,8 @@ const SPEECH_PREROLL = SR / 2;
 // behind for a moment (~0.6 s here), which the inbox below keeps from delaying turn decisions.
 const KEYWORD_PREROLL = Math.round(SR * 0.8);
 const MAX_UTTERANCE_SAMPLES = SR * 30;
+/** Longest wait for an engine's final text (engines have their own, shorter timeouts; this is the backstop). */
+const FINAL_TIMEOUT_MS = 30_000;
 
 const port = parentPort!;
 const send = (msg: FromHearing) => port.postMessage(msg);
@@ -192,7 +194,7 @@ function finalize(s: Session, reason: TurnReason) {
     });
   // what was heard so far stands in when the final text can't be had
   const failed = (e: unknown) => {
-    send({ type: "error", message: `speech to text: ${(e as Error).message ?? e}` });
+    send({ type: "error", message: `speech to text: ${e instanceof Error ? e.message : String(e)}` });
     done(u.lastText);
   };
   let text: string | Promise<string>;
@@ -201,9 +203,13 @@ function finalize(s: Session, reason: TurnReason) {
   } catch (e) {
     return failed(e);
   }
-  // a remote service answers later; the next utterance carries on meanwhile
-  if (typeof text === "string") done(text);
-  else text.then(done, failed);
+  // a remote service answers later; the next utterance carries on meanwhile (and a service that
+  // never answers doesn't swallow the turn)
+  if (typeof text === "string") return done(text);
+  let timer: NodeJS.Timeout | undefined;
+  Promise.race([text, new Promise<never>((_, reject) => (timer = setTimeout(() => reject(new Error(`no final text after ${FINAL_TIMEOUT_MS / 1000} s`)), FINAL_TIMEOUT_MS)))])
+    .then(done, failed)
+    .finally(() => clearTimeout(timer));
 }
 
 /** Drops an utterance without finishing it. */
@@ -313,7 +319,7 @@ const inbox: ToHearing[] = [];
 let draining = false;
 
 port.on("message", (msg: ToHearing) => {
-  if (msg.type === "init") return void init(msg.config).catch((e) => send({ type: "error", message: (e as Error).stack ?? String(e) }));
+  if (msg.type === "init") return void init(msg.config).catch((e) => send({ type: "fatal", message: e instanceof Error ? e.message : String(e) }));
   inbox.push(msg);
   if (!draining) {
     draining = true;

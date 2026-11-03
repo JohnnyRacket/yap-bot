@@ -27,75 +27,91 @@ const pkg = JSON.parse(readFileSync(new URL("package.json", PKG_ROOT), "utf8")) 
 
 const [command, ...rest] = process.argv.slice(2);
 
-switch (command) {
-  case "dev":
-  case "start": {
-    const { positionals } = parseArgs({ args: rest, allowPositionals: true });
-    const { start } = await import("./start.ts");
-    await start({ agentDir: positionals[0], watch: command === "dev" ? undefined : false });
-    break;
-  }
-  case "models": {
-    const { values, positionals } = parseArgs({ args: rest, allowPositionals: true, options: { defaults: { type: "boolean" } } });
-    const { downloadModels, missingModels } = await import("./models.ts");
-    const { defaultModelsDir } = await import("./start.ts");
-    const modelsDir = defaultModelsDir();
-    let downloads;
-    if (values.defaults) {
-      const { defaultEngines } = await import("./engines/index.ts");
-      downloads = Object.values(defaultEngines()).flatMap((e) => e.downloads ?? []);
-    } else {
-      const { loadAgent } = await import("./agent/loader.ts");
-      const { voiceDownloads } = await import("./hub.ts");
-      downloads = voiceDownloads(await loadAgent(resolve(positionals[0] ?? process.env.AGENT_DIR ?? "agent")));
+try {
+
+  switch (command) {
+    case "dev":
+    case "start": {
+      const { positionals } = parseArgs({ args: rest, allowPositionals: true });
+      const { start } = await import("./start.ts");
+      await start({ agentDir: positionals[0], watch: command === "dev" ? undefined : false });
+      break;
     }
-    const missing = missingModels(modelsDir, downloads);
-    console.log(`models: ${modelsDir} (${downloads.length - missing.length} of ${downloads.length} already there)`);
-    await downloadModels(modelsDir, downloads);
-    break;
+    case "models": {
+      const { values, positionals } = parseArgs({ args: rest, allowPositionals: true, options: { defaults: { type: "boolean" } } });
+      const { downloadModels, missingModels } = await import("./models.ts");
+      const { defaultModelsDir } = await import("./start.ts");
+      const modelsDir = defaultModelsDir();
+      let downloads;
+      if (values.defaults) {
+        const { defaultEngines } = await import("./engines/index.ts");
+        downloads = Object.values(defaultEngines()).flatMap((e) => e.downloads ?? []);
+      } else {
+        const { loadAgent } = await import("./agent/loader.ts");
+        const { voiceDownloads } = await import("./hub.ts");
+        downloads = voiceDownloads(await loadAgent(resolve(positionals[0] ?? process.env.AGENT_DIR ?? "agent"), { requireModel: false }));
+      }
+      const missing = missingModels(modelsDir, downloads);
+      console.log(`models: ${modelsDir} (${downloads.length - missing.length} of ${downloads.length} already there)`);
+      await downloadModels(modelsDir, downloads);
+      break;
+    }
+    case "say": {
+      const { values, positionals } = parseArgs({
+        args: rest,
+        allowPositionals: true,
+        options: { url: { type: "string" }, room: { type: "string" }, token: { type: "string" } },
+      });
+      if (!positionals.length) fail('usage: yap-bot say "first turn" ["second turn" …]');
+      const scheme = process.env.TLS === "off" ? "ws" : "wss";
+      await say(values.url ?? process.env.YAP_URL ?? `${scheme}://localhost:${process.env.PORT || 8450}/ws`, positionals, values.room, values.token ?? process.env.YAP_DEVICE_TOKEN);
+      break;
+    }
+    case "eval": {
+      const { values, positionals } = parseArgs({
+        args: rest,
+        allowPositionals: true,
+        options: { cases: { type: "string", default: "evals/cases.ts" }, reps: { type: "string", default: "1" }, only: { type: "string" } },
+      });
+      const file = resolve(values.cases!);
+      if (!existsSync(file)) fail(`no cases at ${file} (export const cases: EvalCase[] = […])`);
+      const { cases } = await import(pathToFileURL(file).href);
+      const { runEval } = await import("./testing/eval.ts");
+      const r = await runEval({ agentDir: resolve(positionals[0] ?? process.env.AGENT_DIR ?? "agent"), cases, reps: Number(values.reps), only: values.only });
+      // for CI: a failed case fails the command
+      if (r.passed < r.total) process.exitCode = 1;
+      break;
+    }
+    case "init": {
+      const { values, positionals } = parseArgs({ args: rest, allowPositionals: true, options: { name: { type: "string" } } });
+      if (!positionals[0]) fail("usage: yap-bot init <dir> [--name N]");
+      init(resolve(positionals[0]), values.name);
+      break;
+    }
+    case "--version":
+    case "-v":
+      console.log(pkg.version);
+      break;
+    case undefined:
+    case "help":
+    case "--help":
+    case "-h":
+      console.log(HELP);
+      break;
+    default:
+      fail(`unknown command ${command}\n\n${HELP}`);
   }
-  case "say": {
-    const { values, positionals } = parseArgs({
-      args: rest,
-      allowPositionals: true,
-      options: { url: { type: "string" }, room: { type: "string" }, token: { type: "string" } },
-    });
-    if (!positionals.length) fail('usage: yap-bot say "first turn" ["second turn" …]');
-    const scheme = process.env.TLS === "off" ? "ws" : "wss";
-    await say(values.url ?? process.env.YAP_URL ?? `${scheme}://localhost:${process.env.PORT || 8450}/ws`, positionals, values.room, values.token ?? process.env.YAP_DEVICE_TOKEN);
-    break;
-  }
-  case "eval": {
-    const { values, positionals } = parseArgs({
-      args: rest,
-      allowPositionals: true,
-      options: { cases: { type: "string", default: "evals/cases.ts" }, reps: { type: "string", default: "1" }, only: { type: "string" } },
-    });
-    const file = resolve(values.cases!);
-    if (!existsSync(file)) fail(`no cases at ${file} (export const cases: EvalCase[] = […])`);
-    const { cases } = await import(pathToFileURL(file).href);
-    const { runEval } = await import("./testing/eval.ts");
-    await runEval({ agentDir: resolve(positionals[0] ?? process.env.AGENT_DIR ?? "agent"), cases, reps: Number(values.reps), only: values.only });
-    break;
-  }
-  case "init": {
-    const { values, positionals } = parseArgs({ args: rest, allowPositionals: true, options: { name: { type: "string" } } });
-    if (!positionals[0]) fail("usage: yap-bot init <dir> [--name N]");
-    init(resolve(positionals[0]), values.name);
-    break;
-  }
-  case "--version":
-  case "-v":
-    console.log(pkg.version);
-    break;
-  case undefined:
-  case "help":
-  case "--help":
-  case "-h":
-    console.log(HELP);
-    break;
-  default:
-    fail(`unknown command ${command}\n\n${HELP}`);
+} catch (e) {
+  fail(friendly(e));
+}
+
+/** Startup failures as one line saying what to do, not a stack trace (DEBUG=1 for that). */
+function friendly(e: unknown): string {
+  const err = e as NodeJS.ErrnoException & { port?: number };
+  if (process.env.DEBUG) return err.stack ?? String(e);
+  if (err.code === "EADDRINUSE") return `port ${err.port ?? process.env.PORT ?? 8450} is in use: stop what's using it, or set PORT (in .env)`;
+  if (err.code === "EACCES") return `not allowed to listen on port ${err.port ?? process.env.PORT}: use a port above 1024`;
+  return err.message ?? String(e);
 }
 
 function fail(message: string): never {
@@ -130,11 +146,13 @@ function init(dir: string, name = basename(dir)) {
   if (existsSync(dir) && readdirSync(dir).length) fail(`${dir} isn't empty`);
   cpSync(new URL("template/", PKG_ROOT), dir, { recursive: true });
   const fill = (file: string) => writeFileSync(join(dir, file), readFileSync(join(dir, file), "utf8").replaceAll("Yappy", name));
-  for (const f of ["agent/agent.ts", "agent/instructions.md", "README.md", "deploy/Dockerfile"]) fill(f);
+  for (const f of ["agent/agent.ts", "agent/instructions.md", "README.md"]) fill(f);
+  const npmName = name.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "") || "agent";
+  // an image tag can't have capitals or spaces
+  writeFileSync(join(dir, "deploy/Dockerfile"), readFileSync(join(dir, "deploy/Dockerfile"), "utf8").replaceAll("Yappy", npmName));
   // npm leaves .gitignore files out of packages, so the template's go without the dot
   renameSync(join(dir, "gitignore"), join(dir, ".gitignore"));
   renameSync(join(dir, "env.example"), join(dir, ".env.example"));
-  const npmName = name.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "") || "agent";
   const projectPkg = {
     name: npmName,
     private: true,

@@ -89,6 +89,34 @@ test("kokoro fetches the voice that's picked", async () => {
   assert.deepEqual(spec.downloadsFor?.("not a voice"), []);
 });
 
+test("shared() makes a value once per server", async () => {
+  const { shared } = await import("../src/shared.ts");
+  let made = 0;
+  const a = shared("test-thing", () => ({ n: ++made }));
+  const b = shared("test-thing", () => ({ n: ++made }));
+  assert.equal(a, b);
+  assert.equal(made, 1);
+});
+
+test("a wrong port answering HTTP fails the Wyoming connection, not the process", async () => {
+  const server = createServer((sock) => sock.end("HTTP/1.1 400 Bad Request\r\n\r\n"));
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  const client = new WyomingClient("127.0.0.1", (server.address() as { port: number }).port);
+  client.send("describe");
+  assert.equal(await client.next(), null);
+  assert.match(String(client.error?.message), /not a Wyoming reply/);
+  server.close();
+});
+
+test("trimHistory also trims by size", () => {
+  const big = "x".repeat(5000);
+  const h: ChatMessage[] = [];
+  for (let i = 0; i < 6; i++) h.push({ role: "user", content: `q${i}` }, { role: "assistant", content: big });
+  const t = trimHistory(h, 40, 12_000);
+  assert.ok(t.reduce((n, m) => n + (m.content?.length ?? 0), 0) <= 6000 + 10);
+  assert.equal(t[0].role, "user");
+});
+
 test("wyoming events: split data and payload, in pieces", async () => {
   const server = createServer((sock) => {
     sock.on("data", () => {

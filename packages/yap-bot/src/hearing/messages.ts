@@ -50,4 +50,6 @@ export type FromHearing =
     }
   | { type: "judged"; sid: string; probability: number; ms: number; at: number }
   | { type: "keyword"; sid: string; keyword: string; at: number }
-  | { type: "error"; message: string };
+  | { type: "error"; message: string }
+  /** Hearing couldn't start (a model missing or broken): nothing will be heard. */
+  | { type: "fatal"; message: string };

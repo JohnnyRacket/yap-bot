@@ -169,9 +169,32 @@ export class Audio {
     }
   }
 
+  /** Speech that came before the page could play sound (a browser needs a tap first), played after it. */
+  private held: { chunkId: number; pcm?: Int16Array }[] = [];
+  /** Something arrived to play, but the page can't make sound yet: ask for a tap. */
+  onNeedsTap?: () => void;
+
+  get ready() {
+    return !!this.player;
+  }
+
+  /** After the tap: whatever was held plays now. */
+  async unlock() {
+    await this.init();
+    await this.ctx.resume();
+    const held = this.held;
+    this.held = [];
+    for (const h of held) (h.pcm ? this.play(h.chunkId, h.pcm) : this.endChunk(h.chunkId));
+  }
+
   /** Synchronous so audio and the chunk's end marker reach the worklet in order. Needs init() first (a click). */
   play(chunkId: number, pcm: Int16Array) {
-    if (!this.player) return;
+    if (!this.player) {
+      // up to a minute of it (24 kHz)
+      if (this.held.reduce((n, h) => n + (h.pcm?.length ?? 0), 0) < 24000 * 60) this.held.push({ chunkId, pcm });
+      this.onNeedsTap?.();
+      return;
+    }
     if (this.ctx.state !== "running") void this.ctx.resume();
     let r = this.ttsResamplers.get(chunkId);
     if (!r) {
@@ -185,11 +208,13 @@ export class Audio {
   }
 
   endChunk(chunkId: number) {
+    if (!this.player) return void this.held.push({ chunkId });
     this.ttsResamplers.delete(chunkId);
     this.player?.port.postMessage({ type: "end", id: chunkId });
   }
 
   flush() {
+    this.held = [];
     this.ttsResamplers.clear();
     this.player?.port.postMessage({ type: "flush" });
   }

@@ -21,7 +21,8 @@ import type { Hub } from "./hub.ts";
 import { prefill, runLoop } from "./agent/loop.ts";
 import { LOAD_SKILL, trimHistory, userMessage } from "./agent/prompt.ts";
 import { summarize } from "./agent/loader.ts";
-import { Priority } from "./llm/client.ts";
+import { Priority, type ChatMessage } from "./llm/client.ts";
+import { errorMessage } from "./errors.ts";
 import { SentenceSplitter } from "./speech/splitter.ts";
 import { log } from "./log.ts";
 
@@ -32,6 +33,8 @@ interface Chunk {
   durationMs: number;
   playedMs: number;
   done: boolean;
+  /** Synthesis failed: never heard. */
+  failed?: boolean;
 }
 
 interface Turn {
@@ -58,11 +61,27 @@ interface Turn {
   sleep: boolean;
   /** Tools called, for the log ("name!" when it failed). */
   tools: string[];
+  /** This turn's messages for the history (user, tool calls, tool results), added when it's over. */
+  messages: ChatMessage[];
   createdAt: number;
 }
 
 /** How many of the latest acks a new one avoids repeating (when the tool has others to pick). */
 const RECENT_ACKS = 4;
+/** A tool result kept in the history beyond this many characters is cut (the turn itself saw it all). */
+const HISTORY_TOOL_CHARS = 2000;
+/** A fastpath gets as long as a tool does. */
+const FASTPATH_TIMEOUT_MS = 20_000;
+
+/** Runs an agent's hook; one that throws is logged, not allowed to take the session down. */
+function safely<T>(what: string, fn: () => T): T | undefined {
+  try {
+    return fn();
+  } catch (e) {
+    log.error(`${what} threw: ${errorMessage(e)}`);
+    return undefined;
+  }
+}
 
 const normalize = (t: string) => t.toLowerCase().replace(/[^\p{L}\p{N}\s']/gu, " ").replace(/\s+/g, " ").trim();
 const wordCount = (t: string) => normalize(t).split(" ").filter(Boolean).length;
@@ -95,6 +114,9 @@ export class Session {
   /** Playback held because someone started talking over the reply. */
   private paused = false;
   private pauseTimer?: NodeJS.Timeout;
+  /** Someone is speaking (an utterance has started and not yet ended): announcements wait. */
+  private hearingSpeech = false;
+  private closed = false;
   /** Reading the prompt during speech: the request in flight, the text it read, the newest text. */
   private prefilling: AbortController | null = null;
   private prefilled = "";
@@ -156,6 +178,7 @@ export class Session {
     switch (msg.type) {
       case "mode":
         this.mode = msg.mode;
+        this.hearingSpeech = false;
         if (msg.interruptions !== undefined) this.interruptions = msg.interruptions;
         if (msg.wakeDetector) this.detector = msg.wakeDetector;
         this.hub.hearing.mode(this.sid, msg.mode, this.spotting(), this.gated());
@@ -188,8 +211,12 @@ export class Session {
     }
   }
 
+  /** The device went away: the turn is recorded as interrupted, and nothing more is started. */
   close() {
-    this.turn?.abort.abort();
+    this.pending = [];
+    if (this.turn) this.interrupt();
+    this.closed = true;
+    this.clearPause();
     this.stopPrefill();
     clearTimeout(this.followUp);
     this.hub.hearing.close(this.sid);
@@ -221,6 +248,8 @@ export class Session {
   private setAwake(awake: boolean, listen = false) {
     if (this.awake === awake) return;
     this.awake = awake;
+    // falling asleep drops an utterance in progress without a turn
+    if (!awake) this.hearingSpeech = false;
     this.hub.hearing.awake(this.sid, awake, listen);
   }
 
@@ -260,6 +289,7 @@ export class Session {
   private onHearing(ev: HearingEvent) {
     switch (ev.type) {
       case "speech_start":
+        this.hearingSpeech = true;
         this.speechStartAt = ev.at;
         this.judgedMarks = [];
         if (this.awake) clearTimeout(this.followUp);
@@ -287,6 +317,9 @@ export class Session {
         this.judgedMarks.push({ name: "judged", at: ev.at, detail: `p=${ev.probability?.toFixed(2)} in ${ev.ms} ms` });
         break;
       case "turn": {
+        this.hearingSpeech = false;
+        // an announcement that waited for this utterance to end (unless the utterance starts a turn)
+        queueMicrotask(() => this.nextAnnouncement());
         let text = ev.text;
         // an engine without live words (a batch service) only now says what was said over the reply
         if (this.turn && text && this.interruptions && this.accepting(text) && wordCount(text) >= this.hub.reg.voice.interruptions.minWords) {
@@ -355,6 +388,7 @@ export class Session {
       leadChecked: false,
       sleep: false,
       tools: [],
+      messages: [],
       createdAt: Date.now(),
     };
     this.turn = turn;
@@ -363,7 +397,7 @@ export class Session {
 
   private startTurn(raw: string, marks: TimelineMark[]) {
     const reg = this.hub.reg;
-    const hooked = reg.voice.hooks.beforeTurn?.(raw, this.device);
+    const hooked = safely("hooks.beforeTurn", () => reg.voice.hooks.beforeTurn?.(raw, this.device));
     if (hooked === null) return;
     const text = typeof hooked === "string" ? hooked : raw;
 
@@ -376,7 +410,7 @@ export class Session {
     void this.runTurn(turn).catch((e) => {
       if (turn.abort.signal.aborted) return;
       log.error(`[${this.device.id}] turn ${turn.id} failed`, e);
-      this.send({ type: "error", message: (e as Error).message });
+      this.send({ type: "error", message: errorMessage(e) });
       this.say(turn, reg.voice.phrases.error);
       this.endText(turn);
     });
@@ -403,7 +437,11 @@ export class Session {
       const match = matchFastpath(def, ntext);
       if (match === false) continue;
       this.mark(turn, "fastpath", name);
-      const reply = await def.run({ ...this.toolContext(turn), store: this.hub.storeFor(`fastpath-${name}`), text: ntext, raw: turn.userText, match });
+      let timer: NodeJS.Timeout | undefined;
+      const reply = await Promise.race([
+        Promise.resolve(def.run({ ...this.toolContext(turn), store: this.hub.storeFor(`fastpath-${name}`), text: ntext, raw: turn.userText, match })),
+        new Promise<never>((_, reject) => (timer = setTimeout(() => reject(new Error(`fastpath ${name} timed out`)), FASTPATH_TIMEOUT_MS))),
+      ]).finally(() => clearTimeout(timer));
       if (reply) {
         turn.finalText = reply;
         this.say(turn, reply);
@@ -414,7 +452,8 @@ export class Session {
 
     turn.usedLlm = true;
     const history = this.history();
-    history.push(userMessage(reg, this.device, turn.userText));
+    const user = userMessage(reg, this.device, turn.userText);
+    turn.messages.push(user);
     const splitter = new SentenceSplitter((piece) => {
       if (turn.acked && !turn.leadChecked) {
         turn.leadChecked = true;
@@ -429,20 +468,24 @@ export class Session {
       reg,
       llm: this.hub.llm,
       priority: Priority.Conversation,
-      history: [...history],
+      history: [...history, user],
       ctx: this.toolContext(turn),
       storeFor: (name) => this.hub.storeFor(name),
       events: {
         onText: (d) => splitter.push(d),
         onFirstToken: (at) => turn.marks.push({ name: "llm_first_token", at }),
-        onToolCalling: (name) => this.ack(turn, name),
+        onToolCalling: (name) => {
+          // what came before the call is a sentence of its own, not the start of the reply's first one
+          splitter.flush();
+          this.ack(turn, name);
+        },
         onToolStart: (name, input) => this.mark(turn, "tool_start", name) && this.send({ type: "tool", turnId: turn.id, name, input }),
         onToolEnd: (name, input, r) => {
           turn.tools.push(r.error !== undefined ? `${name}!` : name);
           if (r.error !== undefined) log.warn(`[${this.device.id}] tool ${name}(${JSON.stringify(input)}) failed: ${r.error}`);
           this.send({ type: "tool", turnId: turn.id, name, input, output: r.output, error: r.error, ms: r.ms });
         },
-        onMessage: (m) => history.push(m),
+        onMessage: (m) => void (turn.abort.signal.aborted || turn.messages.push(m)),
       },
     });
     if (turn.abort.signal.aborted) return;
@@ -486,7 +529,7 @@ export class Session {
 
   private history() {
     let h = this.hub.histories.get(this.device.id) ?? [];
-    h = trimHistory(h, this.hub.reg.agent.historyMessages);
+    h = trimHistory(h, this.hub.reg.agent.historyMessages, this.hub.reg.agent.historyChars);
     this.hub.histories.set(this.device.id, h);
     return h;
   }
@@ -537,9 +580,11 @@ export class Session {
       this.send({ type: "tts_end", chunkId: chunk.id, durationMs: chunk.durationMs });
     } catch (e) {
       if (turn.abort.signal.aborted) return;
-      log.error(`[${this.device.id}] tts failed`, e);
+      log.error(`[${this.device.id}] tts failed: ${errorMessage(e)}`);
+      this.send({ type: "error", message: `speech failed: ${errorMessage(e)}` });
       chunk.synthesized = true;
       chunk.done = true;
+      chunk.failed = true;
     } finally {
       turn.synthesizing = false;
     }
@@ -577,6 +622,7 @@ export class Session {
   private spoken(turn: Turn): string {
     const parts: string[] = [];
     for (const c of turn.chunks) {
+      if (c.failed) continue;
       if (c.done) parts.push(c.text);
       else if (c.playedMs > 0 && c.durationMs > 0) {
         const words = c.text.split(/\s+/);
@@ -603,19 +649,35 @@ export class Session {
     if (this.turn === turn) this.clearPause();
     clearTimeout(turn.safety);
     const spoken = this.spoken(turn);
-    if (turn.usedLlm) {
-      // roles must alternate for some chat templates, so a reply is always recorded
-      this.history().push({ role: "assistant", content: spoken || (interrupted ? "(interrupted)" : turn.finalText || "(no reply)") });
-    }
+    if (turn.usedLlm) this.record(turn, spoken || (interrupted ? "(interrupted)" : turn.finalText || "(no reply)"));
     this.send({ type: "turn_done", turnId: turn.id, interrupted, spoken });
     this.send({ type: "metrics", turnId: turn.id, marks: turn.marks, llm: turn.stats });
     if (this.turn === turn) this.turn = null;
     if (turn.kind === "turn") this.logTurn(turn, spoken, interrupted);
     if (turn.kind === "turn") {
-      this.hub.reg.voice.hooks.afterTurn?.({ turnId: turn.id, device: this.device, text: turn.userText, spoken, interrupted });
+      safely("hooks.afterTurn", () => this.hub.reg.voice.hooks.afterTurn?.({ turnId: turn.id, device: this.device, text: turn.userText, spoken, interrupted }));
     }
     this.afterTurnState(turn.sleep);
     this.nextAnnouncement();
+  }
+
+  /**
+   * Adds a finished turn to the device's history, whole and in order: the user's words, each tool
+   * call with its result (a call cut off by an interruption gets one saying so), then what was said.
+   * Roles alternate and every call is answered, which chat templates and servers insist on.
+   */
+  private record(turn: Turn, reply: string) {
+    const h = this.history();
+    const answered = new Set(turn.messages.flatMap((m) => (m.role === "tool" ? [m.tool_call_id] : [])));
+    for (const m of turn.messages) {
+      if (m.role === "tool" && m.content.length > HISTORY_TOOL_CHARS) h.push({ ...m, content: `${m.content.slice(0, HISTORY_TOOL_CHARS)}… (cut short)` });
+      else h.push(m);
+    }
+    for (const m of turn.messages) {
+      if (m.role !== "assistant" || !m.tool_calls) continue;
+      for (const c of m.tool_calls) if (!answered.has(c.id)) h.push({ role: "tool", tool_call_id: c.id, content: JSON.stringify({ error: "interrupted before it finished" }) });
+    }
+    h.push({ role: "assistant", content: reply });
   }
 
   /** One line per turn: what was heard, the tools it called, what was said, and how soon. */
@@ -633,7 +695,7 @@ export class Session {
   }
 
   private afterTurnState(sleep = false) {
-    if (this.turn) return;
+    if (this.turn || this.closed) return;
     if (this.mode !== "wake") return this.setState("listening");
     if (sleep && this.awake) {
       clearTimeout(this.followUp);
@@ -661,8 +723,14 @@ export class Session {
     turn.safety = undefined;
     this.send({ type: "pause" });
     turn.marks.push({ name: "paused", at: Date.now() });
-    // not confirmed as an interruption in time: carry on
-    this.pauseTimer = setTimeout(() => this.resume(), 4000);
+    // not confirmed as an interruption in time: carry on (but not while they're still talking, up to 16 s:
+    // an engine without live words only says what was said once they stop)
+    let holds = 0;
+    const check = () => {
+      if (this.hearingSpeech && ++holds < 4) this.pauseTimer = setTimeout(check, 4000);
+      else this.resume();
+    };
+    this.pauseTimer = setTimeout(check, 4000);
   }
 
   private resume() {
@@ -711,13 +779,15 @@ export class Session {
   // --- announcements ---------------------------------------------------------------------
 
   announce(text: string, source: string) {
+    if (this.closed) return;
     this.pending.push({ text, source });
     if (!this.turn) this.nextAnnouncement();
   }
 
   private nextAnnouncement() {
-    const next = this.pending.shift();
-    if (!next || this.turn) return;
+    // not over someone talking; it's said once they're done
+    if (this.turn || this.closed || this.hearingSpeech || !this.pending.length) return;
+    const next = this.pending.shift()!;
     const turn = this.newTurn("announce", "", []);
     this.send({ type: "announce", text: next.text, source: next.source });
     this.setState("thinking");

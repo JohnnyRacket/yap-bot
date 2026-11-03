@@ -205,6 +205,71 @@ test("a device token keeps out devices without it", async () => {
   }
 });
 
+/** The roles of the last request's conversation, and whether every tool call in it was answered. */
+function lastConversation() {
+  const msgs = llm.requests[llm.requests.length - 1].messages.filter((m) => m.role !== "system");
+  const ids = msgs.flatMap((m) => (m.role === "assistant" && m.tool_calls ? m.tool_calls.map((c) => c.id) : []));
+  const answered = new Set(msgs.flatMap((m) => (m.role === "tool" ? [m.tool_call_id] : [])));
+  return { roles: msgs.map((m) => m.role), unanswered: ids.filter((id) => !answered.has(id)) };
+}
+
+test("interrupted during a tool: the calls after it don't run, and the history stays valid", async () => {
+  const c = await device();
+  const timersBefore = server.hub.timers.list().length;
+  c.send({ type: "text", text: "place the hold twice" });
+  await c.waitFor((m) => m.type === "tool" && m.name === "slow_lookup" && m.output === undefined && m.error === undefined);
+  c.send({ type: "interrupt" });
+  await c.waitFor((m) => m.type === "turn_done");
+  await new Promise((r) => setTimeout(r, 500)); // past the slow tool's own timeout
+  assert.equal(server.hub.timers.list().length, timersBefore, "the second call (a timer) never ran");
+  c.send({ type: "text", text: "hi" });
+  await untilDone(c);
+  const { roles, unanswered } = lastConversation();
+  assert.deepEqual(unanswered, [], "every tool call in the history has a result");
+  assert.deepEqual(roles, ["user", "assistant", "tool", "tool", "assistant", "user"]);
+});
+
+test("a device that disconnects mid-turn leaves a valid history behind", async () => {
+  const c = await device();
+  c.send({ type: "text", text: "tell me a story" });
+  await c.waitFor((m) => m.type === "state" && m.state === "speaking", 10_000);
+  c.close();
+  await new Promise((r) => setTimeout(r, 200));
+  const again = new TestClient();
+  await again.connect(`ws://127.0.0.1:${server.port}/ws`, `test-${clients.indexOf(c)}`, "push");
+  clients.push(again);
+  again.send({ type: "text", text: "hi" });
+  await untilDone(again);
+  assert.deepEqual(lastConversation().roles, ["user", "assistant", "user"]);
+});
+
+test("a tool that throws a string is reported as failed, not as done", async () => {
+  const c = await device();
+  c.send({ type: "text", text: "throw a string" });
+  const msgs = await untilDone(c);
+  const tool = msgs.find((m) => m.type === "tool" && m.error !== undefined);
+  assert.equal(tool?.type === "tool" && tool.error, "the library said no");
+  assert.deepEqual(said(msgs), ["That didn't work."]);
+});
+
+test("text before a tool call is a sentence of its own", async () => {
+  const c = await device();
+  c.send({ type: "text", text: "how many are my holds" });
+  assert.deepEqual(said(await untilDone(c)), ["Let me check that", "She has three holds."]);
+});
+
+test("a model that stalls is given up on, and the turn says so", async () => {
+  const c = await device();
+  c.send({ type: "text", text: "please stall" });
+  const msgs = await untilDone(c, 10_000);
+  const err = msgs.find((m) => m.type === "error");
+  assert.match(err?.type === "error" ? err.message : "", /stalled after 0.6 s/);
+  assert.equal(said(msgs).at(-1), "Sorry, something went wrong.");
+  // and the next turn isn't stuck behind it
+  c.send({ type: "text", text: "hi" });
+  assert.deepEqual(said(await untilDone(c)), ["Hello there.", "How can I help?"]);
+});
+
 test("health", async () => {
   const h = (await (await fetch(`${url}/health`)).json()) as { ok: boolean; agent: string };
   assert.deepEqual([h.ok, h.agent], [true, "Test agent"]);

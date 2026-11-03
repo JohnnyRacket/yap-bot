@@ -12,6 +12,7 @@ import { existsSync, readdirSync, readFileSync, statSync, watch } from "node:fs"
 import { basename, extname, join, relative } from "node:path";
 import { pathToFileURL } from "node:url";
 import { registerHooks } from "node:module";
+import { z } from "zod";
 import { defineVoice, type AgentDefinition, type FastpathDefinition, type ScheduleDefinition, type ToolDefinition, type TriggerDefinition, type TriggerEventName, type VoiceDefinition } from "../define.ts";
 import { log } from "../log.ts";
 
@@ -96,8 +97,15 @@ function versionAgentImports(dir: string) {
 }
 
 async function importDefault(file: string, version: number): Promise<any> {
-  const mod = await import(`${pathToFileURL(file).href}?v=${version}`);
-  return mod.default;
+  try {
+    const mod = await import(`${pathToFileURL(file).href}?v=${version}`);
+    return mod.default;
+  } catch (e) {
+    // say which file (a syntax error otherwise names nothing), and where in it when the stack says
+    const name = basename(file).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const where = (e as Error).stack?.match(new RegExp(`${name}(?:\\?v=\\d+)?(:\\d+(?::\\d+)?)`))?.[1] ?? "";
+    throw new Error(`${relative(process.cwd(), file)}${where}: ${(e as Error).message}`);
+  }
 }
 
 function files(dir: string, exts: string[]): string[] {
@@ -127,7 +135,8 @@ function parseEvery(every: string, name: string) {
 
 let version = 0;
 
-export async function loadAgent(dir: string): Promise<Registry> {
+/** requireModel: false for commands that never call the model (yap-bot models, e.g. while building an image). */
+export async function loadAgent(dir: string, o: { requireModel?: boolean } = {}): Promise<Registry> {
   versionAgentImports(dir);
   const v = ++version;
   const agentFile = join(dir, "agent.ts");
@@ -135,7 +144,7 @@ export async function loadAgent(dir: string): Promise<Registry> {
   if (!existsSync(agentFile)) throw new Error(`missing ${agentFile}`);
   const agent: AgentDefinition = await importDefault(agentFile, v);
   expectKind(agent, "agent", agentFile);
-  if (!agent.model.id && !agent.model.complete) throw new Error(`${agentFile}: no model: set model.id (or LLM_MODEL)`);
+  if (o.requireModel !== false && !agent.model.id && !agent.model.complete) throw new Error(`no model: set LLM_MODEL (in .env) or model.id in ${agentFile}`);
   let voice: VoiceDefinition = defineVoice();
   if (existsSync(voiceFile)) {
     voice = await importDefault(voiceFile, v);
@@ -154,6 +163,14 @@ export async function loadAgent(dir: string): Promise<Registry> {
     if (tools.some((t) => t.name === name)) throw new Error(`${f}: there's already a tool named ${name} (a tool's name is its file name, folders aside)`);
     const def = await importDefault(f, v);
     expectKind(def, "tool", f);
+    // checked now rather than failing every turn once the model sees the tool list
+    try {
+      if (typeof def.input?.safeParse !== "function") throw new Error("not a zod schema");
+      z.toJSONSchema(def.input);
+    } catch (e) {
+      throw new Error(`${f}: input must be z.object({ … }) (${(e as Error).message})`);
+    }
+    if (typeof def.execute !== "function") throw new Error(`${f}: execute must be a function`);
     tools.push({ name, def });
   }
 
@@ -225,7 +242,11 @@ export async function loadAgent(dir: string): Promise<Registry> {
     }
   }
 
-  for (const { name, def } of triggers) if (def.on.every) parseEvery(def.on.every, name);
+  for (const { name, def } of triggers) {
+    if (def.on.every) parseEvery(def.on.every, name);
+    // its payload goes into a prompt that can call every tool
+    if (def.on.webhook === true && def.prompt) log.warn(`trigger ${name}: a webhook anyone on the network can call puts its payload in a prompt with your tools; give it a secret (secret_env)`);
+  }
 
   if (tools.length > 15) log.warn(`${tools.length} tools: a small model chooses worse past ~15`);
   return { agent, voice, instructions, tools, skills, fastpaths, schedules, triggers };

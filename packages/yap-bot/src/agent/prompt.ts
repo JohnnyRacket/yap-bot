@@ -1,7 +1,9 @@
 // Builds what the model sees, ordered from never-changing to per-turn so llama.cpp can reuse the
 // cached prefix: instructions → skills index → tools → history → per-turn context + words.
 import { z } from "zod";
-import type { Device } from "../define.ts";
+import { defaultTurnContext, type Device } from "../define.ts";
+import { errorMessage } from "../errors.ts";
+import { log } from "../log.ts";
 import type { ChatMessage, ToolSpec } from "../llm/client.ts";
 import type { Registry, Skill } from "./loader.ts";
 
@@ -45,20 +47,32 @@ export function matchedSkills(reg: Registry, text: string): Skill[] {
 }
 
 export function userMessage(reg: Registry, device: Device, text: string): ChatMessage {
-  const context = reg.agent.prompt.context(device, new Date(), reg.agent.timezone);
+  let context: string;
+  try {
+    context = reg.agent.prompt.context(device, new Date(), reg.agent.timezone);
+  } catch (e) {
+    log.error(`prompt.context threw: ${errorMessage(e)}`);
+    context = defaultTurnContext(device, new Date(), reg.agent.timezone);
+  }
   let content = context ? `${context}\n${text}` : text;
   for (const s of matchedSkills(reg, text)) content += `\n\n<skill name="${s.name}">\n${s.content}\n</skill>`;
   return { role: "user", content };
 }
 
+const size = (m: ChatMessage) => (m.content?.length ?? 0) + ("tool_calls" in m && m.tool_calls ? JSON.stringify(m.tool_calls).length : 0);
+
 /**
- * Past `max` messages, drops back to the last half, starting at a user message so tool calls stay
- * paired. Dropping in big steps instead of one message per turn keeps the cached prefix valid
- * between trims.
+ * Past `max` messages or `maxChars` characters (tool results add up), drops back to half of each,
+ * starting at a user message so tool calls stay paired. Dropping in big steps instead of one message
+ * per turn keeps the cached prefix valid between trims.
  */
-export function trimHistory(history: ChatMessage[], max: number): ChatMessage[] {
-  if (history.length <= max) return history;
-  let start = history.length - Math.floor(max / 2);
+export function trimHistory(history: ChatMessage[], max: number, maxChars = Infinity): ChatMessage[] {
+  let chars = 0;
+  for (const m of history) chars += size(m);
+  if (history.length <= max && chars <= maxChars) return history;
+  let start = history.length;
+  let kept = 0;
+  while (start > 0 && history.length - start < Math.floor(max / 2) && kept + size(history[start - 1]) <= maxChars / 2) kept += size(history[--start]);
   while (start < history.length && history[start].role !== "user") start++;
   return history.slice(start);
 }

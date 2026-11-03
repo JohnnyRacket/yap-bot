@@ -89,6 +89,8 @@ export interface AgentDefinition {
   timezone: string;
   /** Conversation messages kept per device. */
   historyMessages: number;
+  /** …and characters (about 4 per token): long tool results fill a small model's context fast. */
+  historyChars: number;
   /** Model rounds per turn (each one may call tools) before it gives up. */
   maxToolRounds: number;
   prompt: {
@@ -152,6 +154,8 @@ export interface AgentInput {
   timezone?: string;
   /** Default 40. */
   historyMessages?: number;
+  /** Default 24000 (about 6000 tokens). */
+  historyChars?: number;
   /** Default 6. */
   maxToolRounds?: number;
   prompt?: Partial<AgentDefinition["prompt"]>;
@@ -169,12 +173,15 @@ export function defineAgent(def: AgentInput): AgentDefinition {
       baseUrl: process.env.LLM_URL ?? "http://localhost:8080/v1",
       id: process.env.LLM_MODEL ?? "",
       apiKey: process.env.LLM_API_KEY || undefined,
+      // a model that never stops would otherwise hold the queue until it runs out of context
+      maxTokens: 1024,
       ...def.model,
     },
     wake: def.wake ?? DEFAULT_WAKE,
     followUpMs: def.followUpMs ?? 8000,
     timezone: def.timezone ?? process.env.TZ ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
     historyMessages: def.historyMessages ?? 40,
+    historyChars: def.historyChars ?? 24_000,
     maxToolRounds: def.maxToolRounds ?? 6,
     prompt: { voiceRules: DEFAULT_VOICE_RULES, context: defaultTurnContext, ...def.prompt },
     ui: { title: def.name, icon: "🗣️", ...def.ui },

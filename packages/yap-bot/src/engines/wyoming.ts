@@ -35,7 +35,14 @@ export class WyomingClient {
     this.ready.catch(() => {});
     this.socket.on("data", (chunk: Buffer) => {
       this.buf = Buffer.concat([this.buf, chunk]);
-      this.parse();
+      // not a Wyoming server (a wrong port answering HTTP, say): this connection fails, nothing else
+      try {
+        this.parse();
+      } catch (e) {
+        this.error = new Error(`wyoming ${host}:${port}: not a Wyoming reply (${(e as Error).message}); is that the right port?`);
+        this.socket.destroy();
+        this.push(null);
+      }
     });
     this.socket.on("error", (e) => {
       this.error = e;
@@ -74,7 +81,10 @@ export class WyomingClient {
   private parse() {
     for (;;) {
       const nl = this.buf.indexOf(10);
-      if (nl < 0) return;
+      if (nl < 0) {
+        if (this.buf.length > 64 * 1024) throw new Error("no event header in 64 KB");
+        return;
+      }
       const header = JSON.parse(this.buf.subarray(0, nl).toString("utf8"));
       const dataLength: number = header.data_length ?? 0;
       const payloadLength: number = header.payload_length ?? 0;

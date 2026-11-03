@@ -36,6 +36,12 @@ export interface ModelConfig {
   thinking?: boolean;
   /** Merged into every request body. */
   extraBody?: Record<string, unknown>;
+  /**
+   * Give up on a request with no first byte after `firstByteMs` (default 120 s: a server may be
+   * loading the model), or that stalls `idleMs` between pieces (default 30 s), so a stuck server
+   * can't hold the queue every device waits in.
+   */
+  timeouts?: { firstByteMs?: number; idleMs?: number };
   /** Replaces the built-in client: for providers that aren't OpenAI-compatible. */
   complete?(req: CompletionRequest): Promise<CompletionResult>;
 }
@@ -50,6 +56,7 @@ export interface CompletionRequest {
   maxTokens?: number;
   thinking?: boolean;
   extraBody?: Record<string, unknown>;
+  timeouts?: { firstByteMs?: number; idleMs?: number };
   signal?: AbortSignal;
   onText?(delta: string): void;
   /** A tool call's name as it streams in, before its arguments are written. */
@@ -77,6 +84,7 @@ export function chat(model: ModelConfig, req: Omit<CompletionRequest, "baseUrl" 
     maxTokens: model.maxTokens,
     thinking: model.thinking,
     extraBody: model.extraBody,
+    timeouts: model.timeouts,
     ...req,
   };
   return (model.complete ?? complete)(full);
@@ -98,11 +106,33 @@ export async function complete(req: CompletionRequest): Promise<CompletionResult
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (req.apiKey) headers.Authorization = `Bearer ${req.apiKey}`;
 
-  const res = await fetch(`${req.baseUrl.replace(/\/$/, "")}/chat/completions`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(body),
-    signal: req.signal,
+  // one timer: first for the first byte, then reset by every piece that arrives
+  const stalled = new AbortController();
+  let timer: NodeJS.Timeout | undefined;
+  const wait = (ms: number, what: string) => {
+    clearTimeout(timer);
+    timer = setTimeout(() => stalled.abort(new Error(`LLM ${what} after ${ms / 1000} s`)), ms);
+  };
+  wait(req.timeouts?.firstByteMs ?? 120_000, "didn't answer");
+  const idleMs = req.timeouts?.idleMs ?? 30_000;
+  const signal = req.signal ? AbortSignal.any([req.signal, stalled.signal]) : stalled.signal;
+  try {
+    return await stream(req, body, headers, signal, () => wait(idleMs, "stalled"));
+  } catch (e) {
+    // a timeout says so (fetch would otherwise report a bare AbortError)
+    if (stalled.signal.aborted && !req.signal?.aborted) throw stalled.signal.reason;
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function stream(req: CompletionRequest, body: Record<string, unknown>, headers: Record<string, string>, signal: AbortSignal, alive: () => void): Promise<CompletionResult> {
+  const url = `${req.baseUrl.replace(/\/$/, "")}/chat/completions`;
+  const res = await fetch(url, { method: "POST", headers, body: JSON.stringify(body), signal }).catch((e: Error & { cause?: { code?: string; message?: string } }) => {
+    if (signal.aborted) throw e;
+    // "fetch failed" says nothing; the cause says what (ECONNREFUSED, ENOTFOUND…)
+    throw new Error(`LLM at ${req.baseUrl} unreachable: ${e.cause?.code ?? e.cause?.message ?? e.message}`);
   });
   if (!res.ok || !res.body) throw new Error(`LLM ${res.status}: ${(await res.text()).slice(0, 300)}`);
 
@@ -111,6 +141,7 @@ export async function complete(req: CompletionRequest): Promise<CompletionResult
   const decoder = new TextDecoder();
   let buf = "";
   for await (const chunk of res.body as unknown as AsyncIterable<Uint8Array>) {
+    alive();
     buf += decoder.decode(chunk, { stream: true });
     let nl: number;
     while ((nl = buf.indexOf("\n")) >= 0) {
@@ -120,6 +151,8 @@ export async function complete(req: CompletionRequest): Promise<CompletionResult
       const data = line.slice(5).trim();
       if (data === "[DONE]") continue;
       const msg = JSON.parse(data);
+      // an error in the middle of the stream (llama.cpp, vLLM and OpenAI send these)
+      if (msg.error) throw new Error(`LLM: ${typeof msg.error === "string" ? msg.error : (msg.error.message ?? JSON.stringify(msg.error))}`);
       if (msg.timings) {
         result.promptTokens = msg.timings.prompt_n;
         result.cachedTokens = msg.timings.cache_n;

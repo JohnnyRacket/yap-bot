@@ -100,7 +100,7 @@ async function readBody(req: IncomingMessage, limit = 64 * 1024): Promise<string
   return Buffer.concat(parts).toString("utf8");
 }
 
-/** POST (or GET) /hooks/<name> → the webhook trigger of that name. */
+/** POST /hooks/<name> → the webhook trigger of that name. (Not GET: a link or an <img> could fire it.) */
 async function webhook(hub: Hub, req: IncomingMessage, res: ServerResponse) {
   const url = new URL(req.url ?? "/", "http://x");
   const name = decodeURIComponent(url.pathname.slice("/hooks/".length));
@@ -108,10 +108,10 @@ async function webhook(hub: Hub, req: IncomingMessage, res: ServerResponse) {
     res.writeHead(status, { "Content-Type": "application/json" });
     res.end(JSON.stringify(body));
   };
-  if (req.method !== "POST" && req.method !== "GET") return reply(405, { error: "use POST" });
+  if (req.method !== "POST") return reply(405, { error: "use POST" });
   let payload: unknown = null;
   try {
-    const raw = req.method === "POST" ? await readBody(req) : "";
+    const raw = await readBody(req);
     payload = raw && (req.headers["content-type"] ?? "").includes("json") ? JSON.parse(raw) : raw || null;
   } catch (e) {
     return reply(400, { error: (e as Error).message });
@@ -174,7 +174,37 @@ export async function startServer(hub: Hub, o: ServerOptions) {
     server = createHttps({ cert, key }, handler);
   }
   const wss = new WebSocketServer({ server, path: "/ws", maxPayload: 4 * 1024 * 1024 });
+  // the server's own errors (a port in use) come out here too; the listen below reports them
+  wss.on("error", () => {});
+  // a phone that drops off the Wi-Fi leaves a half-open socket; pings find it
+  const alive = new WeakSet<import("ws").WebSocket>();
+  const pinger = setInterval(() => {
+    for (const ws of wss.clients) {
+      if (!alive.has(ws)) {
+        ws.terminate();
+        continue;
+      }
+      alive.delete(ws);
+      ws.ping();
+    }
+  }, 20_000);
   wss.on("connection", (ws, req) => {
+    alive.add(ws);
+    ws.on("pong", () => alive.add(ws));
+    // a page from another site open in a browser on the network mustn't drive the agent: browsers say
+    // where a page came from, and it must be this server (other clients send no Origin)
+    const origin = req.headers.origin;
+    const sameHost = (o: string) => {
+      try {
+        return new URL(o).host === req.headers.host;
+      } catch {
+        return false; // "null": a page opened from a file
+      }
+    };
+    if (origin && !sameHost(origin)) {
+      log.warn(`refused a connection from a page on ${origin}`);
+      return ws.close(4403, "wrong origin");
+    }
     const token = hub.reg.agent.deviceToken;
     if (token) {
       const given = new URL(req.url ?? "/", "http://x").searchParams.get("token") ?? "";
@@ -191,9 +221,11 @@ export async function startServer(hub: Hub, o: ServerOptions) {
   });
   const port = (server.address() as import("node:net").AddressInfo).port;
   log.info(`listening on ${o.tls === "off" ? "http" : "https"}://0.0.0.0:${port}`);
+  if (!hub.reg.agent.deviceToken) log.warn("no device token (YAP_DEVICE_TOKEN): anyone who can reach this port can talk to the agent and run its tools");
   return {
     port,
     close: async () => {
+      clearInterval(pinger);
       for (const ws of wss.clients) ws.terminate();
       wss.close();
       server.closeAllConnections();
