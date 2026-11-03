@@ -15,5 +15,7 @@ export default defineAgent({
   },
   // the default wake word is "computer"; your own needs the keyword spotter's tokens (see WakeWord)
   // wake: { word: "jarvis", keywords: ["▁J AR VI S"], keywordBoost: 1.5, keywordThreshold: 0.25 },
-  ui: { title: "Yappy", icon: "🗣️" },
+  // colors: any CSS colors, one set or { light, dark }; devices can change them in Settings → Appearance
+  // ui: { title: "Yappy", colors: { accent: "#0d9488", userBubble: "#0d9488", botBubble: "#e6f2f0", background: "#f6faf9" } },
+  ui: { title: "Yappy" },
 });

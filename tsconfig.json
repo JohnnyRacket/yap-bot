@@ -17,5 +17,7 @@
     // "yap-bot" imports resolve to the source files in this repo
     "customConditions": ["yap-bot-src"]
   },
+  // the web client has its own (bundler resolution, JSX): packages/client-web/tsconfig.json
+  "exclude": ["packages/client-web/**"],
   "include": ["packages/*/src/**/*.ts", "packages/yap-bot/test/**/*.ts", "packages/yap-bot/template/**/*.ts", "scripts/**/*.ts", "examples/**/*.ts"]
 }

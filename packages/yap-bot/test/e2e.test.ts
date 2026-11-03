@@ -77,7 +77,9 @@ test("welcome carries the agent's name and look", async () => {
   clients.push(c);
   const w = await welcome;
   assert.equal(w.type === "welcome" && w.agent, "Test agent");
-  assert.equal(w.type === "welcome" && w.ui.icon, "🗣️");
+  // no icon unless the agent sets one; the title defaults to its name
+  assert.equal(w.type === "welcome" && w.ui.icon, undefined);
+  assert.equal(w.type === "welcome" && w.ui.title, "Test agent");
 });
 
 test("a typed turn calls a tool: ack first, then the reply without its own okay", async () => {

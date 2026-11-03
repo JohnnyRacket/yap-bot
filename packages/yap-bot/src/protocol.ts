@@ -79,6 +79,32 @@ export interface TimelineMark {
   detail?: string;
 }
 
+/** Colors for the device page, as CSS colors. Text on them is picked for contrast. */
+export interface UiPalette {
+  /** Buttons, links, switches' focus, and your bubbles unless userBubble is set. */
+  accent?: string;
+  /** The page behind the conversation. */
+  background?: string;
+  /** Your messages. */
+  userBubble?: string;
+  /** The agent's replies. */
+  botBubble?: string;
+}
+
+/** One palette for both themes, or one for each. */
+export type UiColors = UiPalette | { light?: UiPalette; dark?: UiPalette };
+
+/** How devices show the agent. */
+export interface AgentUi {
+  title: string;
+  /** An emoji for the tab and the empty conversation; without one, a plain mark. */
+  icon?: string;
+  /** Show tool calls and timings on devices that haven't chosen. */
+  details?: boolean;
+  /** The page's colors; devices can change them in Settings → Appearance. */
+  colors?: UiColors;
+}
+
 export interface AgentSummary {
   tools: string[];
   skills: string[];
@@ -93,8 +119,8 @@ export type ServerMessage =
       deviceId: string;
       room: string;
       agent: string;
-      /** How to show the agent: its title and an emoji, and whether to show tool calls and timings by default. */
-      ui: { title: string; icon: string; details?: boolean };
+      /** How to show the agent: its title and an emoji, tool calls and timings by default or not, and its colors. */
+      ui: AgentUi;
       wakeWord: string;
       /** The voices this device can pick, in the order to show them, and the one it has. */
       voices: { id: string; label: string }[];
@@ -126,7 +152,8 @@ export type ServerMessage =
   | { type: "turn_done"; turnId: number; interrupted: boolean; spoken: string }
   | { type: "metrics"; turnId: number; marks: TimelineMark[]; llm?: LlmStats }
   | { type: "error"; message: string }
-  | ({ type: "agent_reloaded" } & AgentSummary);
+  /** The agent was edited: what it can do now, and how to show it. */
+  | ({ type: "agent_reloaded"; ui: AgentUi } & AgentSummary);
 
 export interface LlmStats {
   rounds: number;

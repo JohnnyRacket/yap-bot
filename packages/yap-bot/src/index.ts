@@ -31,6 +31,7 @@ export {
   type Store,
   type TurnInfo,
 } from "./define.ts";
+export type { AgentUi, UiColors, UiPalette } from "./protocol.ts";
 export type { ModelConfig, CompletionRequest, CompletionResult, ChatMessage, ToolCall, ToolSpec } from "./llm/client.ts";
 export { spokenDuration } from "./services/timers.ts";
 export { spokenDigits } from "./spoken.ts";

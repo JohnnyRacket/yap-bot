@@ -137,7 +137,7 @@ export class Hub {
       this.triggers.start();
       void this.warmAcks();
       for (const s of this.sessions.values()) {
-        s.send({ type: "agent_reloaded", ...summarize(this.reg) });
+        s.send({ type: "agent_reloaded", ui: this.reg.agent.ui, ...summarize(this.reg) });
         s.voice = this.voiceFor(s.voice);
         s.send({ type: "voices", voices: this.reg.voice.tts.voices, voice: s.voice });
       }

@@ -1,0 +1,194 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/* Quiet and system-native: Apple's system colors and fonts, hairline borders, translucent bars.
+   The session's state (--mood) colors only the state badge, the mic and the avatar ring. */
+:root {
+  --radius: 0.875rem;
+  --background: #ffffff;
+  --foreground: #1d1d1f;
+  --card: #ffffff;
+  --card-foreground: #1d1d1f;
+  --popover: #ffffff;
+  --popover-foreground: #1d1d1f;
+  --primary: #007aff;
+  --primary-foreground: #ffffff;
+  --secondary: #f2f2f7;
+  --secondary-foreground: #1d1d1f;
+  --muted: #f2f2f7;
+  --muted-foreground: #6e6e73;
+  --accent: #e9e9ee;
+  --accent-foreground: #1d1d1f;
+  --destructive: #ff3b30;
+  --border: rgb(0 0 0 / 0.09);
+  --input: rgb(0 0 0 / 0.12);
+  --ring: #007aff;
+
+  /* the window behind the content (sidebar, grouped settings) and translucent bars */
+  --canvas: #f5f5f7;
+  --glass: rgb(255 255 255 / 0.78);
+  --bubble-bot: #e9e9eb;
+  --idle: #8e8e93;
+  --listening: #32ade6;
+  --thinking: #af52de;
+  --speaking: #ff9500;
+  --good: #34c759;
+  --warn: #ff9f0a;
+  --mood: var(--idle);
+  /* themable (src/theme.ts): accent, background and the bubbles; text on them is picked for contrast */
+  --bubble-user: var(--primary);
+  --bubble-user-foreground: var(--primary-foreground);
+  --bubble-bot-foreground: var(--foreground);
+}
+
+.dark {
+  --background: #161618;
+  --foreground: #f5f5f7;
+  --card: #1c1c1e;
+  --card-foreground: #f5f5f7;
+  --popover: #2c2c2e;
+  --popover-foreground: #f5f5f7;
+  --primary: #0a84ff;
+  --primary-foreground: #ffffff;
+  --secondary: #2c2c2e;
+  --secondary-foreground: #f5f5f7;
+  --muted: #2c2c2e;
+  --muted-foreground: #98989d;
+  --accent: #3a3a3c;
+  --accent-foreground: #f5f5f7;
+  --destructive: #ff453a;
+  --border: rgb(255 255 255 / 0.1);
+  --input: rgb(255 255 255 / 0.14);
+  --ring: #0a84ff;
+
+  --canvas: #0f0f10;
+  --glass: rgb(30 30 32 / 0.78);
+  --bubble-bot: #2c2c2e;
+  --idle: #8e8e93;
+  --listening: #64d2ff;
+  --thinking: #bf5af2;
+  --speaking: #ff9f0a;
+  --good: #30d158;
+  --warn: #ffd60a;
+}
+
+[data-mood="listening"] { --mood: var(--listening); }
+[data-mood="thinking"] { --mood: var(--thinking); }
+[data-mood="speaking"] { --mood: var(--speaking); }
+
+@theme inline {
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  --radius-sm: calc(var(--radius) - 6px);
+  --radius-md: calc(var(--radius) - 3px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-canvas: var(--canvas);
+  --color-glass: var(--glass);
+  --color-bubble-bot: var(--bubble-bot);
+  --color-bubble-bot-foreground: var(--bubble-bot-foreground);
+  --color-bubble-user: var(--bubble-user);
+  --color-bubble-user-foreground: var(--bubble-user-foreground);
+  --color-mood: var(--mood);
+  --color-listening: var(--listening);
+  --color-thinking: var(--thinking);
+  --color-speaking: var(--speaking);
+  --color-idle: var(--idle);
+  --color-good: var(--good);
+  --color-warn: var(--warn);
+}
+
+@layer base {
+  * { @apply border-border outline-ring/50; }
+  html { -webkit-tap-highlight-color: transparent; }
+  body { @apply bg-background text-foreground font-sans antialiased; letter-spacing: -0.01em; }
+  /* --mood is registered so its color fades from one state to the next */
+  :root { transition: --mood 0.4s ease; }
+}
+
+@property --mood {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #8e8e93;
+}
+
+/* frosted bars, as on macOS and iOS */
+.material {
+  background: var(--glass);
+  backdrop-filter: saturate(180%) blur(20px);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+}
+
+/* --- the mic button ------------------------------------------------------------------------ */
+
+.orb {
+  --level: 0;
+  position: relative;
+  isolation: isolate;
+}
+/* a thin ring that grows with the mic level (set from the audio thread's peaks, not through React) */
+.orb[data-live="true"]::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: 9999px;
+  background: color-mix(in srgb, var(--mood) 22%, transparent);
+  transform: scale(calc(1 + var(--level) * 0.45));
+  transition: transform 90ms linear;
+}
+
+/* thinking: three dots */
+.dots span { animation: bob 1.2s ease-in-out infinite; }
+.dots span:nth-child(2) { animation-delay: 0.15s; }
+.dots span:nth-child(3) { animation-delay: 0.3s; }
+@keyframes bob {
+  0%, 80%, 100% { opacity: 0.3; }
+  40% { opacity: 1; }
+}
+
+/* speaking: a little equaliser */
+.eq span { animation: eq 0.9s ease-in-out infinite; transform-origin: bottom; }
+.eq span:nth-child(2) { animation-delay: 0.2s; }
+.eq span:nth-child(3) { animation-delay: 0.4s; }
+.eq span:nth-child(4) { animation-delay: 0.1s; }
+@keyframes eq {
+  0%, 100% { transform: scaleY(0.35); }
+  50% { transform: scaleY(1); }
+}
+
+/* the "start here" hint over the mic */
+.nudge { animation: nudge 2.4s ease-in-out infinite; }
+@keyframes nudge {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-3px); }
+}
+
+.msg-in { animation: msg-in 0.25s ease-out both; }
+@keyframes msg-in {
+  from { opacity: 0; transform: translateY(4px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dots span, .eq span, .msg-in, .nudge { animation: none !important; }
+}

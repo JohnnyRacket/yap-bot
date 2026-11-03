@@ -2,86 +2,22 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
+    <meta name="theme-color" content="#ffffff" />
     <title>yap-bot</title>
-    <link rel="icon" id="favicon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🗣️</text></svg>" />
+    <link rel="icon" id="favicon" type="image/svg+xml" href="/favicon.svg" />
+    <script>
+      // the theme before the first paint, so a dark page doesn't flash white (src/theme.ts takes over)
+      (function () {
+        var t = localStorage.getItem("yap-bot-theme");
+        var dark = t === "dark" || (t !== "light" && matchMedia("(prefers-color-scheme: dark)").matches);
+        if (dark) document.documentElement.classList.add("dark");
+        document.documentElement.style.colorScheme = dark ? "dark" : "light";
+      })();
+    </script>
   </head>
   <body>
-    <header>
-      <div class="brand"><span class="logo">🗣️</span> <span id="brandName">yap-bot</span> <span id="agentInfo" class="muted"></span></div>
-      <div class="status">
-        <span id="conn" class="pill">connecting…</span>
-        <button id="panelToggle" class="btn icon" aria-label="Timings and settings" aria-expanded="false" aria-controls="side">⚙️</button>
-      </div>
-    </header>
-
-    <main>
-      <section class="chat">
-        <div id="messages" class="messages">
-          <div class="empty" id="empty">
-            <div class="big">🗣️</div>
-            <p>Pick a mode below, then talk. <span class="muted">Open mic listens all the time; <span id="wakeHint">wake word waits for the wake word</span>.</span></p>
-          </div>
-        </div>
-
-        <div class="controls">
-          <div class="row">
-            <div class="seg" id="mode">
-              <button data-mode="push">Push to talk</button>
-              <button data-mode="open">Open mic</button>
-              <button data-mode="wake">Wake word</button>
-            </div>
-            <select id="detector" class="btn" title="How wake mode notices the wake word">
-              <option value="device">Wake: on this device</option>
-              <option value="keyword">Wake: server keyword spotter</option>
-              <option value="both">Wake: server, either detector</option>
-              <option value="transcript">Wake: server transcript match</option>
-            </select>
-            <span id="state" class="state idle">idle</span>
-            <div class="meter" title="Mic level"><div id="level"></div></div>
-          </div>
-          <div class="row">
-            <button id="mic" class="mic" title="Start the microphone">🎙️</button>
-            <form id="textForm" class="textForm">
-              <input id="text" placeholder="…or type a message" autocomplete="off" />
-              <button type="submit" class="btn">Send</button>
-            </form>
-            <button id="stop" class="btn" title="Stop speaking (Esc)">Stop</button>
-          </div>
-          <div id="hint" class="hint muted"></div>
-          <div id="heard" class="heard"></div>
-        </div>
-      </section>
-
-      <div id="backdrop" class="backdrop"></div>
-      <aside class="side" id="side">
-        <div class="card details-only">
-          <h3>Last turn</h3>
-          <div id="timeline" class="timeline"><p class="muted">Timings show up after a turn.</p></div>
-          <div id="llmStats" class="stats"></div>
-        </div>
-        <div class="card">
-          <h3>Settings</h3>
-          <label class="field">Device name <input id="deviceId" /></label>
-          <label class="field">Room <input id="room" /></label>
-          <label class="field" id="voiceField" hidden>Voice <select id="voice" title="Best voices first"></select></label>
-          <label class="check"><input type="checkbox" id="interruptions" /> Talking over it interrupts</label>
-          <label class="check"><input type="checkbox" id="echo" /> Echo cancellation <span class="muted">(off only with headphones)</span></label>
-          <label class="check"><input type="checkbox" id="details" /> Show details <span class="muted">(tool calls, timings, wake word settings)</span></label>
-          <div class="row gap">
-            <button id="apply" class="btn">Reconnect</button>
-            <button id="reset" class="btn">Forget conversation</button>
-          </div>
-        </div>
-        <div class="card">
-          <h3>Agent</h3>
-          <div id="agentDetails" class="muted small"></div>
-        </div>
-      </aside>
-    </main>
-    <div id="start" class="start" hidden>
-      <button id="startBtn" class="startBtn"><span class="logo big">🗣️</span><span>Tap to start</span></button>
-    </div>
-    <script type="module" src="/src/main.ts"></script>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

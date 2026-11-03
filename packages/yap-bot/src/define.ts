@@ -4,6 +4,7 @@ import type { z } from "zod";
 import type { EngineSpec, KwsSpec, TtsSpec } from "./engines/types.ts";
 import { kokoro, nemotron, sherpaKws, silero, smartTurn, type VoiceChoice } from "./engines/index.ts";
 import type { ModelConfig } from "./llm/client.ts";
+import type { AgentUi } from "./protocol.ts";
 import * as acks from "./acks.ts";
 
 export interface Device {
@@ -99,8 +100,12 @@ export interface AgentDefinition {
     /** The line in front of each user message: the date and time, and the room by default. */
     context(device: Device, at: Date, timezone: string): string;
   };
-  /** How devices show the agent. details: show tool calls and timings on devices that haven't chosen (Settings → Show details). */
-  ui: { title: string; icon: string; details?: boolean };
+  /**
+   * How devices show the agent. details: show tool calls and timings on devices that haven't chosen
+   * (Settings → Show details). colors: the page's accent, background and bubbles, one set or
+   * { light, dark }; each device can change them in Settings → Appearance.
+   */
+  ui: AgentUi;
   /** Bearer token for POST /api/ask; unset, it refuses every request. Default: $YAP_API_SECRET. */
   apiSecret?: string;
   /**
@@ -160,7 +165,7 @@ export interface AgentInput {
   /** Default 6. */
   maxToolRounds?: number;
   prompt?: Partial<AgentDefinition["prompt"]>;
-  /** Default: the name and 🗣️. */
+  /** Default: the name as the title, and no icon. */
   ui?: Partial<AgentDefinition["ui"]>;
   apiSecret?: string;
   deviceToken?: string;
@@ -185,7 +190,7 @@ export function defineAgent(def: AgentInput): AgentDefinition {
     historyChars: def.historyChars ?? 24_000,
     maxToolRounds: def.maxToolRounds ?? 6,
     prompt: { voiceRules: DEFAULT_VOICE_RULES, context: defaultTurnContext, ...def.prompt },
-    ui: { title: def.name, icon: "🗣️", ...def.ui },
+    ui: { title: def.name, ...def.ui },
     apiSecret: def.apiSecret ?? (process.env.YAP_API_SECRET || undefined),
     deviceToken: def.deviceToken ?? (process.env.YAP_DEVICE_TOKEN || undefined),
   };

@@ -315,6 +315,12 @@ sound (browsers require it), keeps the screen on while listening, and hides tool
 unless Settings → Show details is on (or the page is opened with `?debug`). `ui: { details: true }`
 in the agent turns them on for devices that haven't chosen, handy while building one.
 
+The page's colors come from `ui.colors`: `accent`, `background`, `userBubble` and `botBubble`, any
+CSS colors, either one set for both themes or `{ light: {...}, dark: {...} }`. Text on them is
+picked for contrast, and edits reach open pages without a reload. Each device can change them, or
+pick a preset, in Settings → Appearance; its choice wins over the agent's. Pages follow the
+system's light or dark theme unless the device picks one.
+
 From code: `const { port, close } = await start({ agentDir, port: 0 })` from `yap-bot/server`.
 
 ## This repo

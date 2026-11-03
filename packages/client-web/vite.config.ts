@@ -1,6 +1,9 @@
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import tailwindcss from "@tailwindcss/vite";
+import react from "@vitejs/plugin-react";
 import { defaultClientConditions, defineConfig, type Plugin } from "vite";
 
 const require = createRequire(import.meta.url);
@@ -45,9 +48,12 @@ function sherpaKws(): Plugin {
 // `npm run dev:web` serves the client with hot reload and proxies the device socket to the runtime
 // (npm run dev at the repo root, on https://localhost:8450).
 export default defineConfig({
-  plugins: [sherpaKws()],
-  // the protocol from source: nothing to build first
-  resolve: { conditions: ["yap-bot-src", ...defaultClientConditions] },
+  plugins: [react(), tailwindcss(), sherpaKws()],
+  resolve: {
+    // the protocol from source: nothing to build first
+    conditions: ["yap-bot-src", ...defaultClientConditions],
+    alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
+  },
   worker: { format: "es", plugins: () => [sherpaKws()] },
   server: {
     port: 5173,
