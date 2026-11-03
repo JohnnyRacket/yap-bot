@@ -20,30 +20,61 @@ let deviceColors: DeviceColors = JSON.parse(localStorage.getItem(COLORS_KEY) ?? 
 
 export const COLOR_KEYS: ColorKey[] = ["accent", "background", "userBubble", "botBubble"];
 
-/** Ready-made palettes, light and dark. "Default" clears this device's colors. */
+/** Ready-made palettes, light and dark. Each one is a full color, not a wash on white or black. "Default" clears this device's colors. */
 export const PRESETS: { name: string; colors: DeviceColors }[] = [
   { name: "Default", colors: {} },
   {
     name: "Graphite",
-    colors: { light: { accent: "#3a3a3c", userBubble: "#3a3a3c", background: "#fafafa", botBubble: "#ececee" }, dark: { accent: "#aeaeb2", userBubble: "#48484a", background: "#121212", botBubble: "#262628" } },
+    colors: {
+      light: { accent: "#2c3544", userBubble: "#2c3544", background: "#d5dbe4", botBubble: "#aeb9c8" },
+      dark: { accent: "#d5dde8", userBubble: "#4a5d78", background: "#121a26", botBubble: "#2a3b54" },
+    },
   },
   {
     name: "Mint",
-    colors: { light: { accent: "#00a67e", background: "#f5fbf9", botBubble: "#e3f1ec" }, dark: { accent: "#34d3a6", userBubble: "#0f8a69", background: "#0e1614", botBubble: "#1d2a26" } },
+    colors: {
+      light: { accent: "#056b4e", userBubble: "#056b4e", background: "#c6f3e4", botBubble: "#7dceba" },
+      dark: { accent: "#5eebc4", userBubble: "#5eebc4", background: "#06261f", botBubble: "#145445" },
+    },
   },
   {
     name: "Sunset",
-    colors: { light: { accent: "#f2662e", background: "#fffaf6", botBubble: "#f5e9e1" }, dark: { accent: "#ff8a5c", userBubble: "#d95a2b", background: "#18120f", botBubble: "#2c221d" } },
+    colors: {
+      light: { accent: "#c73b0a", userBubble: "#c73b0a", background: "#ffd4b8", botBubble: "#ffab84" },
+      dark: { accent: "#ffb07a", userBubble: "#ffb07a", background: "#2c160e", botBubble: "#5c3018" },
+    },
   },
   {
     name: "Lavender",
-    colors: { light: { accent: "#7c5cf0", background: "#faf8ff", botBubble: "#ece8f8" }, dark: { accent: "#a78bfa", userBubble: "#6d4fe0", background: "#14121b", botBubble: "#25212f" } },
+    colors: {
+      light: { accent: "#6428e0", userBubble: "#6428e0", background: "#ddd2ff", botBubble: "#c0a8f5" },
+      dark: { accent: "#d2beff", userBubble: "#7c4dff", background: "#1a1030", botBubble: "#3a2870" },
+    },
   },
   {
     name: "Rose",
-    colors: { light: { accent: "#e0457b", background: "#fff8fa", botBubble: "#f6e6ec" }, dark: { accent: "#ff6b9a", userBubble: "#c93a6b", background: "#1a1114", botBubble: "#2d1f25" } },
+    colors: {
+      light: { accent: "#d31262", userBubble: "#d31262", background: "#ffcddd", botBubble: "#ff9dbd" },
+      dark: { accent: "#ffb3cc", userBubble: "#ffb3cc", background: "#2a101c", botBubble: "#5c2240" },
+    },
   },
 ];
+
+/** The first, paler version of each preset. A device that saved one picks up the bolder colors. */
+const LEGACY_PRESETS: DeviceColors[] = [
+  { light: { accent: "#3a3a3c", userBubble: "#3a3a3c", background: "#fafafa", botBubble: "#ececee" }, dark: { accent: "#aeaeb2", userBubble: "#48484a", background: "#121212", botBubble: "#262628" } },
+  { light: { accent: "#00a67e", background: "#f5fbf9", botBubble: "#e3f1ec" }, dark: { accent: "#34d3a6", userBubble: "#0f8a69", background: "#0e1614", botBubble: "#1d2a26" } },
+  { light: { accent: "#f2662e", background: "#fffaf6", botBubble: "#f5e9e1" }, dark: { accent: "#ff8a5c", userBubble: "#d95a2b", background: "#18120f", botBubble: "#2c221d" } },
+  { light: { accent: "#7c5cf0", background: "#faf8ff", botBubble: "#ece8f8" }, dark: { accent: "#a78bfa", userBubble: "#6d4fe0", background: "#14121b", botBubble: "#25212f" } },
+  { light: { accent: "#e0457b", background: "#fff8fa", botBubble: "#f6e6ec" }, dark: { accent: "#ff6b9a", userBubble: "#c93a6b", background: "#1a1114", botBubble: "#2d1f25" } },
+];
+
+const samePalette = (a?: UiPalette, b?: UiPalette) => COLOR_KEYS.every((k) => a?.[k] === b?.[k]);
+const legacy = LEGACY_PRESETS.findIndex((old) => samePalette(old.light, deviceColors.light) && samePalette(old.dark, deviceColors.dark));
+if (legacy >= 0) {
+  deviceColors = structuredClone(PRESETS[legacy + 1].colors);
+  localStorage.setItem(COLORS_KEY, JSON.stringify(deviceColors));
+}
 
 // --- colors ------------------------------------------------------------------------------------
 
@@ -107,8 +138,7 @@ function apply() {
   set("--primary-foreground", accent && textOn(accent));
   const bg = toHex(palette.background);
   set("--background", bg);
-  // the sidebar and grouped lists sit a shade off the page
-  set("--canvas", bg && `color-mix(in srgb, ${bg} ${s === "dark" ? 88 : 96}%, black)`);
+  // cards, fields, the sidebar and borders are mixed from --background in index.css
   const user = toHex(palette.userBubble);
   set("--bubble-user", user);
   set("--bubble-user-foreground", user && textOn(user));

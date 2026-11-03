@@ -26,7 +26,7 @@ export function Dock({ snap }: { snap: Snapshot }) {
   const busy = snap.state === "thinking" || snap.state === "speaking";
   return (
     <footer className="flex-none px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-6 sm:pb-5">
-      <div className="mx-auto flex max-w-3xl flex-col gap-2.5 rounded-[1.375rem] border bg-card p-3 shadow-[0_1px_3px_rgb(0_0_0/0.04),0_8px_24px_rgb(0_0_0/0.06)] sm:p-3.5 dark:shadow-none">
+      <div className="mx-auto flex max-w-3xl flex-col gap-2.5 rounded-[1.375rem] bg-card p-3 shadow-elevation sm:p-3.5">
         <div className="flex items-center gap-2.5">
           <MicButton snap={snap} />
           <Composer />
@@ -197,7 +197,7 @@ function Composer() {
         aria-label="Message"
         autoComplete="off"
         enterKeyHint="send"
-        className="h-10 w-full min-w-0 rounded-full border bg-background pr-11 pl-4 text-base transition-[border-color,box-shadow] outline-none placeholder:text-muted-foreground focus-visible:border-primary/50 focus-visible:ring-[3px] focus-visible:ring-primary/15 sm:text-[15px] dark:bg-secondary/50"
+        className="h-10 w-full min-w-0 rounded-full border border-input bg-field pr-11 pl-4 text-base transition-[background-color,border-color,box-shadow] outline-none placeholder:text-muted-foreground focus-visible:border-primary/50 focus-visible:bg-card focus-visible:ring-[3px] focus-visible:ring-primary/15 sm:text-[15px]"
       />
       <button
         type="submit"

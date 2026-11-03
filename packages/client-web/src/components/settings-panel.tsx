@@ -49,7 +49,7 @@ export function Segmented<T extends string>({ value, options, onChange, classNam
           onClick={() => onChange(o.value)}
           className={cn(
             "inline-flex flex-1 items-center justify-center gap-1.5 rounded-[7px] px-2.5 py-1 font-medium whitespace-nowrap transition-[background-color,color,box-shadow] duration-200",
-            o.value === value ? "bg-card text-foreground shadow-[0_1px_2px_rgb(0_0_0/0.12),0_0_0_0.5px_rgb(0_0_0/0.04)] dark:bg-accent" : "text-muted-foreground hover:text-foreground",
+            o.value === value ? "bg-popover text-foreground shadow-[0_1px_2px_rgb(0_0_0/0.12),0_0_0_0.5px_rgb(0_0_0/0.04)] dark:bg-foreground/20" : "text-muted-foreground hover:text-foreground",
           )}
         >
           {o.label}
@@ -63,7 +63,7 @@ function Group({ title, footer, children }: { title?: string; footer?: string; c
   return (
     <section className="mb-6">
       {title && <h3 className="mb-1.5 px-4 text-xs font-medium tracking-wide text-muted-foreground uppercase">{title}</h3>}
-      <div className="divide-y overflow-hidden rounded-xl bg-card shadow-[0_0_0_0.5px_var(--border)] [&>*]:border-border/70">{children}</div>
+      <div className="divide-y overflow-hidden rounded-xl bg-card shadow-[0_0_0_0.5px_var(--border),0_1px_2px_rgb(0_0_0/0.05)] [&>*]:border-border/70">{children}</div>
       {footer && <p className="mt-1.5 px-4 text-xs leading-snug text-muted-foreground">{footer}</p>}
     </section>
   );
@@ -100,7 +100,7 @@ const THEMES: { value: ThemeChoice; label: string }[] = [
 ];
 
 /** The page's own colors (index.css), for the swatches. */
-const BUILT_IN = { light: { accent: "#007aff", background: "#ffffff" }, dark: { accent: "#0a84ff", background: "#161618" } };
+const BUILT_IN = { light: { accent: "#007aff", background: "#f5f5f7" }, dark: { accent: "#0a84ff", background: "#161618" } };
 
 const COLOR_LABELS: Record<ColorKey, string> = { accent: "Accent", background: "Background", userBubble: "Your messages", botBubble: "Replies" };
 
@@ -160,7 +160,7 @@ function SettingsTab({ snap }: { snap: Snapshot }) {
     setEcho(s.echo);
   }, [s.deviceId, s.room, s.echo]);
   const dirty = deviceId !== s.deviceId || room !== s.room || echo !== s.echo;
-  const field = "w-36 min-w-0 bg-transparent text-right text-[15px] text-muted-foreground outline-none focus:text-foreground";
+  const field = "h-8 w-40 min-w-0 rounded-lg bg-field px-2.5 text-right text-[15px] text-foreground shadow-[inset_0_0_0_0.5px_var(--input)] transition-[background-color,box-shadow] outline-none focus:bg-card focus:shadow-[inset_0_0_0_1px_var(--primary)] focus:ring-[3px] focus:ring-primary/20";
 
   return (
     <>
